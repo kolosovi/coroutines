@@ -1,0 +1,39 @@
+# Problem statement
+
+It seems that I do want a create/resume/suspend mechanism.
+
+Say I do have it. How do I implement non-blocking I/O on top of that?
+
+Probably: code that needs to wait for I/O is ran in a coroutine. When it needs to wait for data, it yields. A separate I/O thread (?) will resume the coroutine when this data is available. It will be returned to the calling coroutine as the result of yield.
+
+Yeah, so starting with the coroutine mechanism seems to be OK. But I want to get a clearer picture of how I will use it to implement non-blocking I/O.
+
+Hm, and it seems that when this coroutine wants to read data it must schedule another coroutine, and this coroutine is special because it needs to make a kqueue call, so it must run in IO thread.
+
+I want to make a stackful coroutine implementation in C++ and then build a non-blocking IO facility on top of that so that coroutines can wait for IO by suspending themselves. I will use a single thread for this, running an event loop that DOES block (i.e. does system calls to a non-blocking IO APIs). I want to implement something very simple with it (e.g. a VERY simple TCP server that echoes whatever you send it).
+
+A dedicated I/O thread is needed because, if no I/O happens, the event loop will block. E.g. select WILL block to wait for some socket to be ready for I/O. kevent is similar in this regard.
+
+# Limitations
+
+- I ONLY target macOS and M1 Macs. So I use the system interface provided by macOS and rely on the instruction set available on M1 Macs.
+- I ONLY use one thread (really?)
+- NO non-blocking I/O support. It can be added later.
+- Stackful because this is more interesting
+- So stackful, asymmetric (can be invoked & can suspend, suspend returns control to caller (??))
+
+# Roadmap
+
+- A coroutine facility
+- An event loop with events coming from user input
+- Do I/O WITHOUT non-blocking stuff (just use the socket API?). Example here: https://www.lua.org/pil/9.4.html. Socket API: https://man7.org/linux/man-pages/man2/recv.2.html
+- A non-blocking IO facility in the event loop
+- A simple TCP server
+
+# How do I test?
+
+A classical example: traversinf a binary tree in preorder. Wow, and this will be effectively non-recursive, right? Nah, it's going to be recursive, and that's kind of the point here. This is what stackful coroutines give us.
+
+# How do I benchmark?
+
+https://github.com/jamboree/co2
