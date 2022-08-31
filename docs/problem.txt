@@ -14,6 +14,34 @@ I want to make a stackful coroutine implementation in C++ and then build a non-b
 
 A dedicated I/O thread is needed because, if no I/O happens, the event loop will block. E.g. select WILL block to wait for some socket to be ready for I/O. kevent is similar in this regard.
 
+How do I use asymmetric stackful coroutines for I/O?
+
+I should probably do this:
+1. User function (ran inside a coroutine) calls some other function
+2. Somewhere in the call stack there's a function that needs to do I/O
+3. It initiates I/O, e.g. makes a socket call with timeout=0, and yields a promise
+4. The promise is yielded to an event loop that resumed the original coroutine. Event loop saves this promise somewhere (a reference to it?)
+5. When promise is fulfilled, event loop resumes coroutine again giving it the fulfilled promise
+6. Function takes promise result and returns it up the call stack to the original user function
+
+Who fulfills the promise? It might be the event loop (e.g it repeatedly makes calls to kevent). It might be a separate I/O (netpoll) thread which repeatedly calls kevent and has a queue to consume new tasks and an output queue to fulfill promises.
+
+Well, actually I don't know. I should probably think about it a little more.
+
+I'm still not so fn sure about the API.
+
+I think I should change it somewhat:
+- on creation, I save args (so I accept both the function AND the args)
+- I have Resume(), NO arguments. The first Resume will activate the coroutine and call the function, that's it.
+- Pushing data back and forth between yielder and resumer is done via shared state, e.g. a coroutine may yield a reference to a Promise and dispatcher might fulfill the Promise and resume again. So NO data flow from resumer to yielder, only from yielder to resumer
+- Non-empty returns are forbidden. Only yields.
+
+OK then. What if I have a coroutine WITHOUT yield? Or maybe with yield, but it doesn't return anything. What would be the return value of Resume then?
+
+Y must be default constructible it seems. Which is not good?
+
+https://stackoverflow.com/questions/15537817/c-how-to-store-a-parameter-pack-as-a-variable
+
 # Limitations
 
 - I ONLY target macOS and M1 Macs. So I use the system interface provided by macOS and rely on the instruction set available on M1 Macs.
