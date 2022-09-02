@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <cstdarg>
+#include <cstdint>
 
 namespace {
     static const int kStackSizeBytes = 32 * 1024;
@@ -14,15 +15,17 @@ namespace {
     // https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#6221universal-stack-constraints
     static const std::align_val_t kStackAlignmentBytes = 16;
 
+    using stack_t = uint64_t;
+
     template<typename Y>
     class Coroutine<Y>;
 
     template<typename Y>
     static Coroutine<Y> *current_coroutine = nullptr;
 
-    static char *current_coroutine_stack_top = nullptr;
+    static stack_t *current_coroutine_stack_top = nullptr;
 
-    extern "C" void switch_stack(char **old_stack_top, char **new_stack_top);
+    extern "C" void switch_stack(stack_t **old_stack_top, stack_t **new_stack_top);
 }
 
 namespace coroutine {
@@ -73,14 +76,18 @@ class Coroutine {
 public:
     Coroutine(std::function<void()> bound_fn)
         : bound_fn_(bound_fn)
-        , stack_(new (kStackAlignmentBytes) char[kStackSizeBytes])
+        , stack_(new (kStackAlignmentBytes) stack_t[kStackSizeBytes / sizeof(stack_t)])
         , stack_top_(stack_ + kStackSizeBytes)
         , status(Status::kSuspended)
     {
-        // We should now initialize our memory.
+        // XXX: I should also preserve SIMD/floating point registers (v0 - v31) + scalable vector registers (z0 - z31) + scalable predicate registers (p0 - p15) + respect frame pointer (whatever that is).
+        for (int i = 0; i < kPreservedRegistersCount; i++) {
+            *(--stack_top_) = 0;
+        }
+        *stack_top_ = reinterpret_cast<stack_t>(this->call);
     }
 
-    void Resume(char **caller_stack_top_ptr) {
+    void Resume(stack_t **caller_stack_top_ptr) {
         if (status != Status::kSuspended) {
             throw StatusViolationError::New(status, {Status::kSuspended});
         }
@@ -99,11 +106,13 @@ public:
 
 private:
     std::function<void()> bound_fn_;
-    std::unique_ptr<char[]> stack_;
-    // Stack is Full and Descending on my machine, so stack_top_ points past the
-    // first available (empty) byte.
-    char *stack_top_;
-    char **caller_stack_top_ptr_;
+    std::unique_ptr<stack_t[]> stack_;
+    // stack_top_ always points at topmost (i.e. lowest-address) full byte of
+    // the stack. Since initially stack is empty, it means that the initial
+    // value of stack_top_ is past the allocated memory region.
+    stack_t *stack_top_;
+    stack_t **caller_stack_top_ptr_;
+    static const int kPreservedRegistersCount_ = 11;
 
     void call() {
         bound_fn_();
