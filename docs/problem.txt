@@ -42,6 +42,47 @@ Y must be default constructible it seems. Which is not good?
 
 https://stackoverflow.com/questions/15537817/c-how-to-store-a-parameter-pack-as-a-variable
 
+```
+52 sub	sp, sp, #48                     ; =48
+53 stp	x20, x19, [sp, #16]             ; 16-byte Folded Spill
+54 stp	x29, x30, [sp, #32]             ; 16-byte Folded Spill
+55 add	x29, sp, #32                    ; =32
+```
+
+Quoting myself:
+> For example, stp x20, x10, [sp, #16] stores the contents of register x20 into address sp + 16 and contents of x19 into address sp + 16 + 8 (each X register is 8 bytes wide).
+
+Example:
+```
+    sp = 0x00080014 (524308)
+sub sp, sp, #48
+    sp = 0x0007ffe4 (524260)
+stp	x20, x19, [sp, #16]
+    Stores to range [sp+16, sp+31]
+stp x29, x30, [sp, #32]
+    Stores to range [sp+32, sp+47]
+```
+
+sp + 47 is initial sp - 1 byte. So anything that's stored at [sp] is not touched.
+So full descending.
+
+out-of-line assembly:
+$ as -c -o return_42.o return_42.s
+$ clang++ -v --std=c++11 -o a.out main.cpp return_42.o
+$ ./a.out
+42
+
+stmfd instruction (store Full Descending, essentially a PUSH instruction)
+https://developer.arm.com/documentation/ddi0406/b/Application-Level-Architecture/Instruction-Details/Alphabetical-list-of-instructions/STMDB---STMFD
+
+Armv8 (A64) instruction set reference
+https://developer.arm.com/documentation/ddi0602/2022-03/?lang=en
+
+Quoting "Porting to Arm 64-bit" by Chris Shore:
+> The load and store multiple instructions have been replaced with instructions which load and store pairs of 64-bit registers. These are used for stack operations as well, in place of the earlier PUSH and POP.
+
+Also see https://stackoverflow.com/q/27095099
+
 # Limitations
 
 - I ONLY target macOS and M1 Macs. So I use the system interface provided by macOS and rely on the instruction set available on M1 Macs.
@@ -61,6 +102,8 @@ https://stackoverflow.com/questions/15537817/c-how-to-store-a-parameter-pack-as-
 # How do I test?
 
 A classical example: traversinf a binary tree in preorder. Wow, and this will be effectively non-recursive, right? Nah, it's going to be recursive, and that's kind of the point here. This is what stackful coroutines give us.
+
+Another cool thing would be to implement non-recursive traversal with coroutines. ALTHOUGH it looks like it would waste A LOT of memory for no gain.
 
 # How do I benchmark?
 
