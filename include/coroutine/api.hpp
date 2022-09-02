@@ -12,15 +12,7 @@ namespace {
     static const int kStackSizeBytes = 32 * 1024;
     // ARM 64-bit requires stack to be 16 byte aligned. See
     // https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#6221universal-stack-constraints
-    static const std:align_val_t kStackAlignmentBytes = 16;
-
-    template<typename Y>
-    void _yield(Y yield_value) {
-    }
-
-    template<typename Y>
-    void _yield() {
-    }
+    static const std::align_val_t kStackAlignmentBytes = 16;
 
     template<typename Y>
     class Coroutine<Y>;
@@ -124,7 +116,7 @@ private:
         }
         status = new_status;
         this->yield_value = yield_value;
-        switch_stack(&stack_top_, caller_stack_top_tr_);
+        switch_stack(&stack_top_, caller_stack_top_ptr_);
     }
 };
 
