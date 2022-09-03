@@ -108,3 +108,12 @@ Another cool thing would be to implement non-recursive traversal with coroutines
 # How do I benchmark?
 
 https://github.com/jamboree/co2
+
+(lldb) p this
+(coroutine::Coroutine<int> *) $2 = 0x000000016fdff110
+(lldb) p caller_stack_top_ptr_
+(coroutine_stack_t **) $3 = 0x000000010007d748
+(lldb) p stack_top_
+(coroutine_stack_t *) $4 = 0x00000001018101a8
+(lldb) p &stack_top_
+(coroutine_stack_t **) $5 = 0x000000016fdff148

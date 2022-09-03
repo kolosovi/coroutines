@@ -8,24 +8,27 @@
 #include <sstream>
 #include <cstdarg>
 #include <cstdint>
+#include <string>
+
+namespace coroutine {
+    template<typename Y>
+    class Coroutine;
+}
 
 namespace {
-    static const int kStackSizeBytes = 32 * 1024;
-    // ARM 64-bit requires stack to be 16 byte aligned. See
-    // https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#6221universal-stack-constraints
-    static const std::align_val_t kStackAlignmentBytes = 16;
-
-    using stack_t = uint64_t;
+    using coroutine_stack_t = uint64_t;
 
     template<typename Y>
-    class Coroutine<Y>;
+    static coroutine::Coroutine<Y> *current_coroutine = nullptr;
+
+    static coroutine_stack_t *current_coroutine_stack_top = nullptr;
+
+    extern "C" void switch_stack(coroutine_stack_t **old_stack_top, coroutine_stack_t **new_stack_top);
 
     template<typename Y>
-    static Coroutine<Y> *current_coroutine = nullptr;
-
-    static stack_t *current_coroutine_stack_top = nullptr;
-
-    extern "C" void switch_stack(stack_t **old_stack_top, stack_t **new_stack_top);
+    static void CallCurrentCoroutine() {
+        current_coroutine<Y>->Call();
+    }
 }
 
 namespace coroutine {
@@ -35,13 +38,28 @@ enum class Status {
     kSuspended,  // Was suspended or hasn't ran yet
     kRunning,  // Was resumed and is running
     kNormal,  // Resumed someone else
-    kDead,  // Is dead (i.e. reached termination)
-    kStatusCount  // always keep it last
+    kDead  // Is dead (i.e. reached termination)
 };
+
+std::string ToString(Status status) {
+    switch (status) {
+        case Status::kInvalid:
+            return "invalid";
+        case Status::kSuspended:
+            return "suspended";
+        case Status::kRunning:
+            return "running";
+        case Status::kNormal:
+            return "normal";
+        case Status::kDead:
+            return "dead";
+    }
+    return "";
+}
 
 class StatusViolationError : public std::logic_error {
 public:
-    explicit StatusViolationError(const string& what_arg)
+    explicit StatusViolationError(const std::string& what_arg)
         : logic_error(what_arg)
     {}
     explicit StatusViolationError(const char* what_arg)
@@ -50,14 +68,14 @@ public:
 
     static StatusViolationError New(Status actual, std::initializer_list<Status> expected) {
         std::stringstream msg;
-        msg << "got coroutine status " << actual ", expected one of";
+        msg << "got coroutine status " << ToString(actual) << ", expected one of";
         bool is_first = true;
         for (auto status : expected) {
             if (!is_first) {
                 msg << ",";
             }
             is_first = false;
-            msg << " " << status;
+            msg << " " << ToString(status);
         }
         return StatusViolationError(msg.str());
     }
@@ -76,29 +94,33 @@ class Coroutine {
 public:
     Coroutine(std::function<void()> bound_fn)
         : bound_fn_(bound_fn)
-        , stack_(new (kStackAlignmentBytes) stack_t[kStackSizeBytes / sizeof(stack_t)])
-        , stack_top_(stack_ + kStackSizeBytes)
+        , stack_(new (kStackAlignmentBytes) coroutine_stack_t[kStackSizeBytes / sizeof(coroutine_stack_t)])
+        , stack_top_(stack_.get() + (kStackSizeBytes / sizeof(coroutine_stack_t)))
         , status(Status::kSuspended)
     {
-        // XXX: I should also preserve SIMD/floating point registers (v0 - v31) + scalable vector registers (z0 - z31) + scalable predicate registers (p0 - p15) + respect frame pointer (whatever that is).
-        for (int i = 0; i < kPreservedRegistersCount; i++) {
+        for (int i = 0; i < kInitialStackOffset; i++) {
             *(--stack_top_) = 0;
         }
-        *stack_top_ = reinterpret_cast<stack_t>(this->call);
+        stack_top_[kLinkRegisterOffset] = reinterpret_cast<coroutine_stack_t>(CallCurrentCoroutine<Y>);
     }
 
-    void Resume(stack_t **caller_stack_top_ptr) {
+    void Resume(coroutine_stack_t **caller_stack_top_ptr) {
         if (status != Status::kSuspended) {
             throw StatusViolationError::New(status, {Status::kSuspended});
         }
         caller_stack_top_ptr_ = caller_stack_top_ptr;
-        status = kRunning;
+        status = Status::kRunning;
         current_coroutine<Y> = this;
         switch_stack(caller_stack_top_ptr_, &stack_top_);
     }
 
     void Yield(std::optional<Y> yield_value) {
-        yield(Status::Status::kSuspended, yield_value);
+        yield(Status::kSuspended, yield_value);
+    }
+
+    void Call() {
+        bound_fn_();
+        yield(Status::kDead, std::optional<Y>{});
     }
 
     std::optional<Y> yield_value;
@@ -106,22 +128,22 @@ public:
 
 private:
     std::function<void()> bound_fn_;
-    std::unique_ptr<stack_t[]> stack_;
+    std::unique_ptr<coroutine_stack_t[]> stack_;
     // stack_top_ always points at topmost (i.e. lowest-address) full byte of
     // the stack. Since initially stack is empty, it means that the initial
     // value of stack_top_ is past the allocated memory region.
-    stack_t *stack_top_;
-    stack_t **caller_stack_top_ptr_;
-    static const int kPreservedRegistersCount_ = 11;
-
-    void call() {
-        bound_fn_();
-        yield(Status::kDead, std::optional<Y>{});
-    }
+    coroutine_stack_t *stack_top_;
+    coroutine_stack_t **caller_stack_top_ptr_;
+    // ARM 64-bit requires stack to be 16 byte aligned. See
+    // https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#6221universal-stack-constraints
+    static const std::align_val_t kStackAlignmentBytes = std::align_val_t(16);
+    static const int kStackSizeBytes = 32 * 1024;
+    static const int kInitialStackOffset = 0x60 / sizeof(coroutine_stack_t);
+    static const int kLinkRegisterOffset = 0x50 / sizeof(coroutine_stack_t);
 
     void yield(Status new_status, std::optional<Y> yield_value) {
-        if (status != kRunning) {
-            throw StatusViolationError::New(status, {kRunning});
+        if (status != Status::kRunning) {
+            throw StatusViolationError::New(status, {Status::kRunning});
         }
         status = new_status;
         this->yield_value = yield_value;
@@ -151,7 +173,7 @@ void Yield(Y yield_value) {
     if (current_coroutine<Y> == nullptr) {
         throw AttemptToYieldFromOutsideACoroutineError();
     }
-    current_coroutine<Y>->Yield();
+    current_coroutine<Y>->Yield(std::optional{yield_value});
 }
 
 }
