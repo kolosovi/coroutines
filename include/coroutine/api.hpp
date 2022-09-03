@@ -93,10 +93,11 @@ template<typename Y>
 class Coroutine {
 public:
     Coroutine(std::function<void()> bound_fn)
-        : bound_fn_(bound_fn)
+        : status(Status::kSuspended)
+        , bound_fn_(bound_fn)
         , stack_(new (kStackAlignmentBytes) coroutine_stack_t[kStackSizeBytes / sizeof(coroutine_stack_t)])
         , stack_top_(stack_.get() + (kStackSizeBytes / sizeof(coroutine_stack_t)))
-        , status(Status::kSuspended)
+        , caller_stack_top_ptr_(nullptr)
     {
         for (int i = 0; i < kInitialStackOffset; i++) {
             *(--stack_top_) = 0;
