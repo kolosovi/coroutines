@@ -18,12 +18,12 @@ namespace coroutine {
 namespace {
     using coroutine_stack_t = uint64_t;
 
-    template<typename Y>
-    static coroutine::Coroutine<Y> *current_coroutine = nullptr;
-
     static coroutine_stack_t *current_coroutine_stack_top = nullptr;
 
     extern "C" void switch_stack(coroutine_stack_t **old_stack_top, coroutine_stack_t **new_stack_top);
+
+    template<typename Y>
+    static coroutine::Coroutine<Y> *current_coroutine = nullptr;
 
     template<typename Y>
     static void CallCurrentCoroutine() {
