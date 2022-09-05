@@ -27,4 +27,5 @@ _switch_stack: ; void (char **old_stack_top (x0), char **new_stack_top (x1))
     ldr lr, [sp, #0x50]
     ; return stack pointer to its original position
     add sp, sp, #0x60
+    ; switch_stack + 72
     ret

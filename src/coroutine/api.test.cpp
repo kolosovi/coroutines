@@ -9,6 +9,7 @@ TEST(CreateAndResume, 1) {
     auto coro = coroutine::Create<int, int, int>(
         std::function<void(int, int)>([](int lhs, int rhs) -> void {
             coroutine::Yield(lhs - rhs);
+            ;
         }),
         5,
         3

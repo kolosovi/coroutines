@@ -4,6 +4,8 @@ project(coroutines)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror -fsanitize=undefined -fsanitize=address")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror")
 enable_language(CXX ASM)
 
 include(FetchContent)
@@ -25,6 +27,9 @@ set_target_properties(coroutine-switch_stack_arm64.s PROPERTIES LINKER_LANGUAGE 
 
 add_executable(coroutine-api.test.cpp src/coroutine/api.test.cpp)
 target_link_libraries(coroutine-api.test.cpp coroutine-switch_stack_arm64.s gtest_main)
+
+add_executable(coroutine-mve.cpp src/coroutine/mve.cpp)
+target_link_libraries(coroutine-mve.cpp coroutine-switch_stack_arm64.s)
 
 add_library(coroutine-example.cpp STATIC src/coroutine/example.cpp)
 

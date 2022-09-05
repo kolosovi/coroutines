@@ -1,0 +1,322 @@
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:177
+Breakpoint 3: where = coroutine-api.test.cpp`void coroutine::Yield<int>(int) + 444 at api.hpp:177:5, address = 0x000000010000d37c
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:146
+Breakpoint 4: where = coroutine-api.test.cpp`coroutine::Coroutine<int>::yield(coroutine::Status, std::__1::optional<int>) + 476 at api.hpp:146:13, address = 0x000000010000db54
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:166
+Breakpoint 5: where = coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coroutine::Coroutine<int>&) + 260 at api.hpp:166:5, address = 0x0000000100005024
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:109
+Breakpoint 6: where = coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(unsigned long long**) + 288 at api.hpp:109:13, address = 0x000000010001aaa4
+
+(lldb) re read sp
+      sp = 0x0000000105007880
+(lldb) p stack_top_
+(coroutine_stack_t *) $20 = 0x00000001050083a0
+
+20 = 0x00000001050083a0
+sp = 0x0000000105007880
+
+(lldb) p this
+(coroutine::Coroutine<int> *) $12 = 0x000000016fdfda00
+(lldb) p this
+(coroutine::Coroutine<int> *) $24 = 0x000000016fdfda00
+
+
+
+
+------------------------------------------------------------------------------------
+
+In which places do we change status?
+
+1. Coroutine::Resume, we change to kRunning from kSuspended
+    b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:109
+2. Coroutine::Yield, we change to kSuspended from kRunning
+    b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:119
+3. Coroutine::Call, we change to kDead from kRunning
+    b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:124
+
+Where do we arrive during test?
+1. Coroutine::Resume
+2. Coroutine::Yield
+3. Coroutine::Resume
+4. Coroutine::Call yield
+
+So put breakpoints in these places. And see.
+
+-- Session starts. I set three breakpoints.
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:109
+Breakpoint 1: where = coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(unsigned long long**) + 288 at api.hpp:109:13, address = 0x000000010001aaa4
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:119
+Breakpoint 2: where = coroutine-api.test.cpp`coroutine::Coroutine<int>::Yield(std::__1::optional<int>) + 456 at api.hpp:119:35, address = 0x000000010000d73c
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:124
+Breakpoint 3: where = coroutine-api.test.cpp`coroutine::Coroutine<int>::Call() + 272 at api.hpp:124:30, address = 0x0000000100019db0
+
+-- I stop at breakpoint 1 in Coroutine::Resume.
+(lldb) r
+Process 14988 launched: '/Users/ikolosov/work/repo/coroutines/build/coroutine-api.test.cpp' (arm64)
+Running main() from /Users/ikolosov/work/repo/coroutines/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CreateAndResume
+[ RUN      ] CreateAndResume.1
+Process 14988 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x000000010001aaa4 coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(this=0x000000016fdfda00, caller_stack_top_ptr=0x000000010014f020) at api.hpp:109:13
+   106      }
+   107
+   108      void Resume(coroutine_stack_t **caller_stack_top_ptr) {
+-> 109          if (status != Status::kSuspended) {
+   110              throw StatusViolationError::New(status, {Status::kSuspended});
+   111          }
+   112          caller_stack_top_ptr_ = caller_stack_top_ptr;
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- Coroutine has status "suspended".
+(lldb) p this
+(coroutine::Coroutine<int> *) $0 = 0x000000016fdfda00
+(lldb) p status
+(coroutine::Status) $1 = kSuspended
+
+-- Coroutine status is changed to running.
+(lldb) p this
+(coroutine::Coroutine<int> *) $3 = 0x000000016fdfda00
+(lldb) p status
+(coroutine::Status) $4 = kRunning
+
+-- current_coroutine is set to "this".
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $5 = 0x000000016fdfda00
+
+-- I expect to stop at Coroutine::Yield
+
+-- I stop at breakpoint 2 in Coroutine::Yield.
+(lldb) s
+Process 14988 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x000000010000d73c coroutine-api.test.cpp`coroutine::Coroutine<int>::Yield(this=0x000000016fdfda00, yield_value= Has Value=true ) at api.hpp:119:35
+   116      }
+   117
+   118      void Yield(std::optional<Y> yield_value) {
+-> 119          yield(Status::kSuspended, yield_value);
+   120      }
+   121
+   122      void Call() {
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- "this" and current status are as expected.
+(lldb) p this
+(coroutine::Coroutine<int> *) $6 = 0x000000016fdfda00
+(lldb) p status
+(coroutine::Status) $7 = kRunning
+
+-- "current_coroutine" is as expected.
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $8 = 0x000000016fdfda00
+
+-- "yield_value" is as expected.
+(lldb) p yield_value
+(std::optional<int>) $9 =  Has Value=true  {
+  Value = 2
+}
+
+-- status is set to kSuspended, yield_value is set to expected value.
+(lldb) p this
+(coroutine::Coroutine<int> *) $16 = 0x000000016fdfda00
+(lldb) p status
+(coroutine::Status) $17 = kSuspended
+(lldb) p this->yield_value
+(std::optional<int>) $18 =  Has Value=true  {
+  Value = 2
+}
+
+-- I expect to stop at Coroutine::Resume.
+-- Instead, I stop at Coroutine::Call yield.
+(lldb) s
+Process 14988 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 3.1
+    frame #0: 0x0000000100019db0 coroutine-api.test.cpp`coroutine::Coroutine<int>::Call(this=0x000000016fdfda00) at api.hpp:124:30
+   121
+   122      void Call() {
+   123          bound_fn_();
+-> 124          yield(Status::kDead, std::optional<Y>{});
+   125      }
+   126
+   127      std::optional<Y> yield_value;
+Target 0: (coroutine-api.test.cpp) stopped.
+
+HYPOTHESIS 0: I didn't switch stack at all. Did I arrive at second Resume call?
+
+-- Breakpoint at second Resume call.
+b /Users/ikolosov/work/repo/coroutines/src/coroutine/api.test.cpp:23
+
+HYPOTHESIS 0 is confirmed. I really didn't switch back to main "coroutine" and thus didn't call Resume for the second time.
+
+-- Set the same 3 breakpoints again
+
+-- Stop at first breakpoint (Coroutine::Resume)
+Process 17640 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x000000010001aaa4 coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(this=0x000000016fdfda00, caller_stack_top_ptr=0x000000010014f020) at api.hpp:109:13
+   106      }
+   107
+   108      void Resume(coroutine_stack_t **caller_stack_top_ptr) {
+-> 109          if (status != Status::kSuspended) {
+   110              throw StatusViolationError::New(status, {Status::kSuspended});
+   111          }
+   112          caller_stack_top_ptr_ = caller_stack_top_ptr;
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- Look at caller stack top ptr and whatnot
+(lldb) s
+Process 17640 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x000000010001ad20 coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(this=0x000000016fdfda00, caller_stack_top_ptr=0x000000010014f020) at api.hpp:115:22
+   112          caller_stack_top_ptr_ = caller_stack_top_ptr;
+   113          status = Status::kRunning;
+   114          current_coroutine<Y> = this;
+-> 115          switch_stack(caller_stack_top_ptr_, &stack_top_);
+   116      }
+   117
+   118      void Yield(std::optional<Y> yield_value) {
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p caller_stack_top_ptr_
+(coroutine_stack_t **) $0 = 0x000000010014f020
+(lldb) p *caller_stack_top_ptr_
+(coroutine_stack_t *) $1 = 0x0000000000000000
+
+-- Memorize current stack pointer. We expect caller_stack_top_ptr_ do be somewhere in the same ballpark after we go to Coroutine::Yield.
+(lldb) re read sp
+      sp = 0x000000016fdfd700
+
+-- We arrive at Coroutine::Yield
+(lldb) s
+Process 17640 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x000000010000d73c coroutine-api.test.cpp`coroutine::Coroutine<int>::Yield(this=0x000000016fdfda00, yield_value= Has Value=true ) at api.hpp:119:35
+   116      }
+   117
+   118      void Yield(std::optional<Y> yield_value) {
+-> 119          yield(Status::kSuspended, yield_value);
+   120      }
+   121
+   122      void Call() {
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- We print *caller_stack_top_ptr_. The pointer itself is the same. The value it references DOES resemble sp. And its smaller than sp we memorized which is expected because we put things on the stack. HMM... I should have also memorized the LR register?? Because this is what's important.
+(lldb) p caller_stack_top_ptr_
+(coroutine_stack_t **) $2 = 0x000000010014f020
+(lldb) p *caller_stack_top_ptr_
+(coroutine_stack_t *) $3 = 0x000000016fdfd6a0
+
+$3 = 0x000000016fdfd6a0
+sp = 0x000000016fdfd700
+
+memory read 0x000000016fdfd6f0
+
+4c ad 01 00 01 00 00 00 b8 da df 6f 01 00 00 00
+
+content of 0x000000016fdfd6f0 (this is *caller_stack_top_ptr_ + 0x60, it stores LR):
+0x4cad010001000000 0xb8dadf6f01000000
+
+first 8 bytes in big endian:
+0x000000010001ad4c
+
+(lldb) x/i 0x000000010001ad4c
+    0x10001ad4c: 0xf940426a   ldr    x10, [x19, #0x80]
+
+
+(lldb) x/128i 0x000000010001ad00
+... a bunch of addresses
+So yeah, its basically the next instruction after call. OK, so LR that was saved to stack looks lEgItT
+    0x10001ad48: 0x940004ee   bl     0x10001c100               ; switch_stack
+    0x10001ad4c: 0xf940426a   ldr    x10, [x19, #0x80]
+
+-- this & status stay the same
+(lldb) p this
+(coroutine::Coroutine<int> *) $7 = 0x000000016fdfda00
+(lldb) p status
+(coroutine::Status) $8 = kSuspended
+
+90 d8 df 6f 01 00 00 00
+000000016fdfd890
+
+What I want to do is to step at assembly level.
+
+-- set breakpoint on Coroutine::Yield
+
+it seems that we go to end of resume and then to yield. We don't return from resume??
+
+Maybe Resume gets inlined??
+
+-- set breakpoint on Coroutine::Yield
+b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:119
+
+-- yield (first one!)
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:119
+-- after Resume in test
+(lldb) b /Users/ikolosov/work/repo/coroutines/src/coroutine/api.test.cpp:20
+-- after Yield in coroutine body
+(lldb) b /Users/ikolosov/work/repo/coroutines/src/coroutine/api.test.cpp:12
+
+So it arrives at 3rd breakpoint. Without sanitizer it arrives at 2d breakpoint first. So it skips Resume entirely, fuuuck
+
+I think it would be better for me to look at assembly.
+
+(lldb) si
+Process 32343 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x000000010001c148 coroutine-api.test.cpp`switch_stack + 72
+coroutine-api.test.cpp`switch_stack:
+->  0x10001c148 <+72>: ret
+
+coroutine-api.test.cpp`main:
+    0x10001c14c <+0>:  stp    x20, x19, [sp, #-0x20]!
+    0x10001c150 <+4>:  stp    x29, x30, [sp, #0x10]
+    0x10001c154 <+8>:  add    x29, sp, #0x10            ; =0x10
+Target 2: (coroutine-api.test.cpp) stopped.
+(lldb) re read lr
+      lr = 0x000000010001ad4c  coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(unsigned long long**) + 968 at api.hpp:115:9
+
+-- before ret
+(lldb) re read lr
+      lr = 0x0000000100004fdc  coroutine-mve.cpp`Coroutine::Resume(unsigned long long**) + 968 at mve.cpp:129:5
+
+-- after ret
+(lldb) re read x19
+     x19 = 0x000000016fdff200
+
+(lldb) p this
+(Coroutine *) $0 = 0x000000016fdff4a0
+
+>>> print('0x{0:0>16x}'.format(0x000000016fdff200 + 0x80))
+0x000000016fdff280
+
+-- breakpoint before switch stack in yield
+b /Users/ikolosov/work/repo/coroutines/src/coroutine/mve.cpp:147
+
+-- before ret
+(lldb) re read lr
+      lr = 0x0000000100002ac4  coroutine-mve.cpp`Coroutine::Resume(unsigned long long**) + 192 at mve.cpp:130:1
+
+-- this is w/ both address & ubsan
+$ ./build/coroutine-api.test.cpp
+Running main() from /Users/ikolosov/work/repo/coroutines/build/_deps/googletest-src/googletest/src/gtest_main.cc
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from CreateAndResume
+[ RUN      ] CreateAndResume.1
+==49676==WARNING: ASan is ignoring requested __asan_handle_no_return: stack type: default top: 0x00016faa8000; bottom 0x000105204000; size: 0x00006a8a4000 (1787445248)
+False positive error reports may follow
+For details see https://github.com/google/sanitizers/issues/189
+unknown file: Failure
+C++ exception with description "got coroutine status suspended, expected one of running" thrown in the test body.
+[  FAILED  ] CreateAndResume.1 (0 ms)
+[----------] 1 test from CreateAndResume (0 ms total)
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] CreateAndResume.1
+
+-- this is interesting and all, BUT hell, this doesn't explain why I arrive at Call yield after Yield rather than at Resume
+
+So asan does give a false positive w/ an exception, but why is the exception thrown at all.
