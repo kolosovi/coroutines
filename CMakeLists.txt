@@ -3,9 +3,7 @@ cmake_minimum_required(VERSION 3.10)
 project(coroutines)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror -fsanitize=undefined -fsanitize=address")
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror -fsanitize=undefined -fsanitize=address")
 enable_language(CXX ASM)
 
 include(FetchContent)
@@ -20,8 +18,6 @@ include_directories(include)
 # Target naming convention: target name corresponds to .cpp filename without the
 # src/ prefix, with directory separators converted to hyphens. Everything else
 # is left as is.
-# CMake Error: Cannot determine link language for target "coroutine-switch_stack_arm64.s".
-# CMake Error: CMake can not determine linker language for target: coroutine-switch_stack_arm64.s
 add_library(coroutine-switch_stack_arm64.s STATIC src/coroutine/switch_stack_arm64.s)
 set_target_properties(coroutine-switch_stack_arm64.s PROPERTIES LINKER_LANGUAGE CXX)
 

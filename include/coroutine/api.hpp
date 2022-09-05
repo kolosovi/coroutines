@@ -140,7 +140,7 @@ private:
     static const std::align_val_t kStackAlignmentBytes = std::align_val_t(16);
     static const int kStackSizeBytes = 32 * 1024;
     static const int kInitialStackOffset = 0x60 / sizeof(coroutine_stack_t);
-    static const int kLinkRegisterOffset = 0x50 / sizeof(coroutine_stack_t);
+    static const int kLinkRegisterOffset = 0x58 / sizeof(coroutine_stack_t);
 
     void yield(Status new_status, std::optional<Y> yield_value) {
         if (status != Status::kRunning) {

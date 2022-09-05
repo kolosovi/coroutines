@@ -9,7 +9,7 @@ _switch_stack: ; void (char **old_stack_top (x0), char **new_stack_top (x1))
     stp x23, x24, [sp, #0x20]
     stp x25, x26, [sp, #0x30]
     stp x27, x28, [sp, #0x40]
-    str lr, [sp, #0x50]
+    stp x29,  lr, [sp, #0x50]
     ; store stack pointer into the address pointed at by first argument (x0).
     ; third argument (x2) is used as a temporary register to store sp.
     mov x2, sp
@@ -24,8 +24,7 @@ _switch_stack: ; void (char **old_stack_top (x0), char **new_stack_top (x1))
     ldp x23, x24, [sp, #0x20]
     ldp x25, x26, [sp, #0x30]
     ldp x27, x28, [sp, #0x40]
-    ldr lr, [sp, #0x50]
+    ldp x29,  lr, [sp, #0x50]
     ; return stack pointer to its original position
     add sp, sp, #0x60
-    ; switch_stack + 72
     ret

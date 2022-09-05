@@ -320,3 +320,24 @@ C++ exception with description "got coroutine status suspended, expected one of 
 -- this is interesting and all, BUT hell, this doesn't explain why I arrive at Call yield after Yield rather than at Resume
 
 So asan does give a false positive w/ an exception, but why is the exception thrown at all.
+
+Hypothesis: I don't restore x29 and this causes this behavior somehow.
+
+(lldb) p this
+(coroutine::Coroutine<int> *) $2 = 0x000000016fdfda00
+(lldb) p *this
+(coroutine::Coroutine<int>) $3 = {
+  yield_value =  Has Value=false  {}
+  status = kRunning
+  bound_fn_ = {
+    __f_ = {
+      __buf_ = (__lx = "`\xe2\xdfo\U00000001")
+      __f_ = 0x0000000104400ec0
+    }
+  }
+  stack_ = 13744632839234567870 {
+    __value_ = 0x0000000105000400
+  }
+  stack_top_ = 0x00000001050083a0
+  caller_stack_top_ptr_ = 0x000000010014f020
+}
