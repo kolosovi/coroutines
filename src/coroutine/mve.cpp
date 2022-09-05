@@ -47,8 +47,8 @@ private:
     // https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#6221universal-stack-constraints
     static const std::align_val_t kStackAlignmentBytes = std::align_val_t(16);
     static const int kStackSizeBytes = 32 * 1024;
-    static const int kInitialStackOffset = 0x60 / sizeof(coroutine_stack_t);
-    static const int kLinkRegisterOffset = 0x58 / sizeof(coroutine_stack_t);
+    static const int kInitialStackOffset = 0x100 / sizeof(coroutine_stack_t);
+    static const int kLinkRegisterOffset = 0x98 / sizeof(coroutine_stack_t);
 
     void yield(Status new_status, std::optional<int> yield_value);
 };
