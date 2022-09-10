@@ -44,27 +44,6 @@ void TraverseInOrder(TreeNode *node) {
     TraverseInOrder(node->right);
 }
 
-void MergeTrees(TreeNode *lhs_root, TreeNode *rhs_root) {
-    auto lhs = coroutine::Create<int, TreeNode*>(
-        std::function<void(TreeNode*)>(TraverseInOrder),
-        lhs_root
-    );
-    auto rhs = coroutine::Create<int, TreeNode*>(
-        std::function<void(TreeNode*)>(TraverseInOrder),
-        rhs_root
-    );
-    auto lhs_value = coroutine::Resume(lhs), rhs_value = coroutine::Resume(rhs);
-    while (lhs_value || rhs_value) {
-        if (lhs_value && (!rhs_value || *lhs_value < *rhs_value)) {
-            coroutine::Yield(*lhs_value);
-            lhs_value = coroutine::Resume(lhs);
-        } else {
-            coroutine::Yield(*rhs_value);
-            rhs_value = coroutine::Resume(rhs);
-        }
-    }
-}
-
 TEST(Coroutine, TraverseBinaryTree1) {
     TreeNode *root = new TreeNode(
         3,
@@ -123,6 +102,27 @@ TEST(Coroutine, TraverseBinaryTree2) {
     auto yield_value = coroutine::Resume(coro);
     EXPECT_EQ(coro.status, coroutine::Status::kDead);
     EXPECT_FALSE(bool(yield_value));
+}
+
+void MergeTrees(TreeNode *lhs_root, TreeNode *rhs_root) {
+    auto lhs = coroutine::Create<int, TreeNode*>(
+        std::function<void(TreeNode*)>(TraverseInOrder),
+        lhs_root
+    );
+    auto rhs = coroutine::Create<int, TreeNode*>(
+        std::function<void(TreeNode*)>(TraverseInOrder),
+        rhs_root
+    );
+    auto lhs_value = coroutine::Resume(lhs), rhs_value = coroutine::Resume(rhs);
+    while (lhs_value || rhs_value) {
+        if (lhs_value && (!rhs_value || *lhs_value < *rhs_value)) {
+            coroutine::Yield(*lhs_value);
+            lhs_value = coroutine::Resume(lhs);
+        } else {
+            coroutine::Yield(*rhs_value);
+            rhs_value = coroutine::Resume(rhs);
+        }
+    }
 }
 
 TEST(Coroutine, MergeBinaryTrees) {

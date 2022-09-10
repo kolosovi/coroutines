@@ -109,6 +109,8 @@ Another cool thing would be to implement non-recursive traversal with coroutines
 
 https://github.com/jamboree/co2
 
+# Various notes
+
 (lldb) p this
 (coroutine::Coroutine<int> *) $2 = 0x000000016fdff110
 (lldb) p caller_stack_top_ptr_
@@ -118,4 +120,237 @@ https://github.com/jamboree/co2
 (lldb) p &stack_top_
 (coroutine_stack_t **) $5 = 0x000000016fdff148
 
-Hmm, so basically yield from nested coroutine yields into mine... And I must change its status to kRunning
+## Debugging exception which is raised when coroutines are nested
+
+Relevant test: Coroutine.MergeBinaryTrees (run with `./build/coroutine-api.test.cpp --gtest_filter=Coroutine.MergeBinaryTrees`).
+
+Hypothesis:
+1. in main, current_coroutine is null
+2. i switch to merge coroutine, current_coroutine becomes &merge, merge status is kRunning
+3. merge resumes lhs, current_coroutine becomes lhs. lhs status is kRunning
+4. lhs yields, its status becomes kSuspended. current_coroutine is still lhs
+5. merge yields. current_coroutine (=lhs) status is kSuspended, so we throw an exception
+
+Debugging session.
+
+I want to note:
+- coroutine::Yield (`b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:174`)
+- coroutine::Resume (`b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:166`)
+- lhs & rhs addresses (`b /Users/ikolosov/work/repo/coroutines/src/coroutine/api.test.cpp:116`)
+
+lldb debugging log below
+
+```
+-- set breakpoints
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:174
+Breakpoint 1: where = coroutine-api.test.cpp`void coroutine::Yield<int>(int) + 352 at api.hpp:174:9, address = 0x00000001000084c0
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:166
+Breakpoint 2: where = coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coroutine::Coroutine<int>&) + 252 at api.hpp:166:5, address = 0x0000000100007d38
+(lldb) b /Users/ikolosov/work/repo/coroutines/src/coroutine/api.test.cpp:116
+Breakpoint 3: where = coroutine-api.test.cpp`Coroutine_TraverseBinaryTree2_Test::TestBody() + 1748 at api.test.cpp:116:10, address = 0x000000010000b6b0
+
+-- stopped at Resume of merge coroutine, its address is 0x000000016fdfcd00, status is kSuspended which is expected
+(lldb) run
+Process 39092 launched: '/Users/ikolosov/work/repo/coroutines/build/coroutine-api.test.cpp' (arm64)
+Running main() from /Users/ikolosov/work/repo/coroutines/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = Coroutine.MergeBinaryTrees
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Coroutine
+[ RUN      ] Coroutine.MergeBinaryTrees
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x0000000100007d38 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x000000016fdfcd00) at api.hpp:166:5
+   163  // terminated rather than yielded, the return value is empty.
+   164  template<typename Y>
+   165  std::optional<Y> Resume(Coroutine<Y> &coro) {
+-> 166      coro.Resume(&current_coroutine_stack_top);
+   167      return coro.yield_value;
+   168  }
+   169
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p coro
+(coroutine::Coroutine<int>) $0 = {
+  yield_value =  Has Value=false  {}
+  status = kSuspended
+  bound_fn_ = {
+    __f_ = {
+      __buf_ = (__lx = "\U00000010\xce\xdfoy\xffa<")
+      __f_ = 0x0000000104600a40
+    }
+  }
+  stack_ = 13744632839234567870 {
+    __value_ = 0x0000000105200400
+  }
+  stack_top_ = 0x0000000105208300
+  caller_stack_top_ptr_ = 0x0000000000000000
+}
+(lldb) p &coro
+(coroutine::Coroutine<int> *) $1 = 0x000000016fdfcd00
+
+-- stopped at Resume again.. Why? It seems I resume lhs, its address is 0x0000000105207520, its status is kSuspended as expected.
+-- current_coroutine is merge coroutine, its status is kRunning as expected.
+(lldb) c
+Process 39092 resuming
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x0000000100007d38 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x0000000105207520) at api.hpp:166:5
+   163  // terminated rather than yielded, the return value is empty.
+   164  template<typename Y>
+   165  std::optional<Y> Resume(Coroutine<Y> &coro) {
+-> 166      coro.Resume(&current_coroutine_stack_top);
+   167      return coro.yield_value;
+   168  }
+   169
+Target 0: (coroutine-api.test.cpp) stopped.
+
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $2 = 0x000000016fdfcd00
+(lldb) p current_coroutine->status
+(coroutine::Status) $7 = kRunning
+(lldb) p &coro
+(coroutine::Coroutine<int> *) $4 = 0x0000000105207520
+(lldb) p coro.status
+(coroutine::Status) $5 = kSuspended
+
+-- stopped at yielding from lhs (current_coroutine). Its status is kRunnning which is expected.
+(lldb) c
+Process 39092 resuming
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x00000001000084c0 coroutine-api.test.cpp`void coroutine::Yield<int>(yield_value=1) at api.hpp:174:9
+   171  // corresponding Resume.
+   172  template<typename Y>
+   173  void Yield(Y yield_value) {
+-> 174      if (current_coroutine<Y> == nullptr) {
+   175          throw AttemptToYieldFromOutsideACoroutineError();
+   176      }
+   177      current_coroutine<Y>->Yield(std::optional{yield_value});
+Target 0: (coroutine-api.test.cpp) stopped.
+
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $8 = 0x0000000105207520
+
+-- stopped at resuming.. who exactly? It seems that rhs. rhs address is 0x00000001052075d0, its status is kSuspended as expected.
+(lldb) c
+Process 39092 resuming
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x0000000100007d38 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x00000001052075d0) at api.hpp:166:5
+   163  // terminated rather than yielded, the return value is empty.
+   164  template<typename Y>
+   165  std::optional<Y> Resume(Coroutine<Y> &coro) {
+-> 166      coro.Resume(&current_coroutine_stack_top);
+   167      return coro.yield_value;
+   168  }
+   169
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p &coro
+(coroutine::Coroutine<int> *) $11 = 0x00000001052075d0
+(lldb) p coro.status
+(coroutine::Status) $12 = kSuspended
+
+-- stopped at yielding from rhs. its status is kRunning which is expected
+(lldb) c
+Process 39092 resuming
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x00000001000084c0 coroutine-api.test.cpp`void coroutine::Yield<int>(yield_value=2) at api.hpp:174:9
+   171  // corresponding Resume.
+   172  template<typename Y>
+   173  void Yield(Y yield_value) {
+-> 174      if (current_coroutine<Y> == nullptr) {
+   175          throw AttemptToYieldFromOutsideACoroutineError();
+   176      }
+   177      current_coroutine<Y>->Yield(std::optional{yield_value});
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $13 = 0x00000001052075d0
+(lldb) p current_coroutine->status
+(coroutine::Status) $14 = kRunning
+
+-- stopped at yielding from merge. BUT current_coroutine is still rhs because it isn't restored in Resume.
+-- current_coroutine (=rhs) status is rightfully kSuspended.
+-- tracing execution further, we reach the status check, which fails because kRunning is expected.
+-- An exception is then thrown.
+(lldb) c
+Process 39092 resuming
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x00000001000084c0 coroutine-api.test.cpp`void coroutine::Yield<int>(yield_value=1) at api.hpp:174:9
+   171  // corresponding Resume.
+   172  template<typename Y>
+   173  void Yield(Y yield_value) {
+-> 174      if (current_coroutine<Y> == nullptr) {
+   175          throw AttemptToYieldFromOutsideACoroutineError();
+   176      }
+   177      current_coroutine<Y>->Yield(std::optional{yield_value});
+Target 0: (coroutine-api.test.cpp) stopped.
+
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $15 = 0x00000001052075d0
+(lldb) p current_coroutine->status
+(coroutine::Status) $16 = kSuspended
+(lldb) s
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x000000010000853c coroutine-api.test.cpp`void coroutine::Yield<int>(yield_value=1) at api.hpp:177:5
+   174      if (current_coroutine<Y> == nullptr) {
+   175          throw AttemptToYieldFromOutsideACoroutineError();
+   176      }
+-> 177      current_coroutine<Y>->Yield(std::optional{yield_value});
+   178  }
+   179
+   180  }
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) s
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x0000000100016820 coroutine-api.test.cpp`coroutine::Coroutine<int>::Yield(this=0x00000001052075d0, yield_value= Has Value=true ) at api.hpp:119:35
+   116      }
+   117
+   118      void Yield(std::optional<Y> yield_value) {
+-> 119          yield(Status::kSuspended, yield_value);
+   120      }
+   121
+   122      void Call() {
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) s
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x0000000100016d50 coroutine-api.test.cpp`coroutine::Coroutine<int>::yield(this=0x00000001052075d0, new_status=kSuspended, yield_value= Has Value=true ) at api.hpp:146:13
+   143      static const int kLinkRegisterOffset = 0x98 / sizeof(coroutine_stack_t);
+   144
+   145      void yield(Status new_status, std::optional<Y> yield_value) {
+-> 146          if (status != Status::kRunning) {
+   147              throw StatusViolationError::New(status, {Status::kRunning});
+   148          }
+   149          status = new_status;
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) s
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x0000000100016da0 coroutine-api.test.cpp`coroutine::Coroutine<int>::yield(this=0x00000001052075d0, new_status=kSuspended, yield_value= Has Value=true ) at api.hpp:147:13
+   144
+   145      void yield(Status new_status, std::optional<Y> yield_value) {
+   146          if (status != Status::kRunning) {
+-> 147              throw StatusViolationError::New(status, {Status::kRunning});
+   148          }
+   149          status = new_status;
+   150          this->yield_value = yield_value;
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) c
+Process 39092 resuming
+==39092==WARNING: ASan is ignoring requested __asan_handle_no_return: stack type: default top: 0x00016fe00000; bottom 0x000105200000; size: 0x00006ac00000 (1790967808)
+False positive error reports may follow
+For details see https://github.com/google/sanitizers/issues/189
+Process 39092 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=1, address=0x0)
+    frame #0: 0x0000000195e4dd94 libunwind.dylib`libunwind::UnwindCursor<libunwind::LocalAddressSpace, libunwind::Registers_arm64>::step() + 600
+libunwind.dylib`libunwind::UnwindCursor<libunwind::LocalAddressSpace, libunwind::Registers_arm64>::step:
+->  0x195e4dd94 <+600>: ldr    x9, [x10]
+    0x195e4dd98 <+604>: str    x9, [x19, #0xf8]
+    0x195e4dd9c <+608>: add    x9, x10, #0x10            ; =0x10
+    0x195e4dda0 <+612>: str    x9, [x19, #0x108]
+Target 0: (coroutine-api.test.cpp) stopped.
+```
