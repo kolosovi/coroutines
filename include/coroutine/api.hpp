@@ -95,8 +95,8 @@ public:
     Coroutine(std::function<void()> bound_fn)
         : status(Status::kSuspended)
         , bound_fn_(bound_fn)
-        , stack_(new (kStackAlignmentBytes) coroutine_stack_t[kStackSizeBytes / sizeof(coroutine_stack_t)])
-        , stack_top_(stack_.get() + (kStackSizeBytes / sizeof(coroutine_stack_t)))
+        , stack_(new (kStackAlignmentBytes) coroutine_stack_t[kStackLength])
+        , stack_top_(stack_.get() + kStackLength)
         , caller_stack_top_ptr_(nullptr)
     {
         for (int i = 0; i < kInitialStackOffset; i++) {
@@ -138,7 +138,7 @@ private:
     // ARM 64-bit requires stack to be 16 byte aligned. See
     // https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#6221universal-stack-constraints
     static const std::align_val_t kStackAlignmentBytes = std::align_val_t(16);
-    static const int kStackSizeBytes = 32 * 1024;
+    static const int kStackLength = (32 * 1024) / sizeof(coroutine_stack_t);
     static const int kInitialStackOffset = 0x100 / sizeof(coroutine_stack_t);
     static const int kLinkRegisterOffset = 0x98 / sizeof(coroutine_stack_t);
 
