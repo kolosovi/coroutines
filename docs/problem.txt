@@ -117,3 +117,5 @@ https://github.com/jamboree/co2
 (coroutine_stack_t *) $4 = 0x00000001018101a8
 (lldb) p &stack_top_
 (coroutine_stack_t **) $5 = 0x000000016fdff148
+
+Hmm, so basically yield from nested coroutine yields into mine... And I must change its status to kRunning
