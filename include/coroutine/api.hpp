@@ -163,7 +163,9 @@ Coroutine<Y> Create(std::function<void(Args...)> fn, Args... args) {
 // terminated rather than yielded, the return value is empty.
 template<typename Y>
 std::optional<Y> Resume(Coroutine<Y> &coro) {
+    auto old_current_coroutine = current_coroutine<Y>;
     coro.Resume(&current_coroutine_stack_top);
+    current_coroutine<Y> = old_current_coroutine;
     return coro.yield_value;
 }
 
