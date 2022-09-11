@@ -354,3 +354,41 @@ libunwind.dylib`libunwind::UnwindCursor<libunwind::LocalAddressSpace, libunwind:
     0x195e4dda0 <+612>: str    x9, [x19, #0x108]
 Target 0: (coroutine-api.test.cpp) stopped.
 ```
+
+I applied a fix (saving current_coroutine into a local variable and restoring it)
+
+```
+-- set breakpoint in Coroutine::Resume
+(lldb) b /Users/ikolosov/work/repo/coroutines/include/coroutine/api.hpp:115
+
+(lldb) run
+Process 41232 launched: '/Users/ikolosov/work/repo/coroutines/build/coroutine-api.test.cpp' (arm64)
+Running main() from /Users/ikolosov/work/repo/coroutines/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Note: Google Test filter = Coroutine.MergeBinaryTrees
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Coroutine
+[ RUN      ] Coroutine.MergeBinaryTrees
+Process 41232 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x0000000100038bd0 coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(this=0x000000016fdfcd00, caller_stack_top_ptr=0x000000010032aa00) at api.hpp:115:22
+   112          caller_stack_top_ptr_ = caller_stack_top_ptr;
+   113          status = Status::kRunning;
+   114          current_coroutine<Y> = this;
+-> 115          switch_stack(caller_stack_top_ptr_, &stack_top_);
+   116      }
+   117
+   118      void Yield(std::optional<Y> yield_value) {
+Target 0: (coroutine-api.test.cpp) stopped.
+
+(lldb) p caller_stack_top_ptr_
+(coroutine_stack_t **) $0 = 0x000000010032aa00
+(lldb) p stack_top_
+(coroutine_stack_t *) $1 = 0x0000000105208300
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $2 = 0x000000016fdfcd00
+
+place a breakpoint on Yield w/ condition that this = 0x000000016fdfcd00
+```
+
+hmmm
