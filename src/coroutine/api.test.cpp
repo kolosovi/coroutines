@@ -127,7 +127,7 @@ void MergeTrees(TreeNode *lhs_root, TreeNode *rhs_root) {
 
 TEST(Coroutine, MergeBinaryTrees) {
     TreeNode *root1 = new TreeNode(
-        3,
+        5,
         new TreeNode(1, nullptr, new TreeNode(3)),
         new TreeNode(
             15,
@@ -149,7 +149,7 @@ TEST(Coroutine, MergeBinaryTrees) {
         new TreeNode(
             18,
             new TreeNode(14, new TreeNode(12), new TreeNode(16)),
-            new TreeNode(22, new TreeNode(20), nullptr)
+            new TreeNode(20, new TreeNode(19), nullptr)
         )
     );
     auto coro = coroutine::Create<int, TreeNode*, TreeNode*>(
@@ -157,7 +157,7 @@ TEST(Coroutine, MergeBinaryTrees) {
         root1,
         root2
     );
-    for (int expected = 1; expected <= 22; expected++) {
+    for (int expected = 1; expected <= 20; expected++) {
         EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
         auto yield_value = coroutine::Resume(coro);
         EXPECT_EQ(coro.status, coroutine::Status::kSuspended);

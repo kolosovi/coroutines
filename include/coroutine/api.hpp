@@ -18,8 +18,6 @@ namespace coroutine {
 namespace {
     using coroutine_stack_t = uint64_t;
 
-    static coroutine_stack_t *current_coroutine_stack_top = nullptr;
-
     extern "C" void switch_stack(coroutine_stack_t **old_stack_top, coroutine_stack_t **new_stack_top);
 
     template<typename Y>
@@ -97,7 +95,7 @@ public:
         , bound_fn_(bound_fn)
         , stack_(new (kStackAlignmentBytes) coroutine_stack_t[kStackLength])
         , stack_top_(stack_.get() + kStackLength)
-        , caller_stack_top_ptr_(nullptr)
+        , caller_stack_top_(nullptr)
     {
         for (int i = 0; i < kInitialStackOffset; i++) {
             *(--stack_top_) = 0;
@@ -105,14 +103,13 @@ public:
         stack_top_[kLinkRegisterOffset] = reinterpret_cast<coroutine_stack_t>(CallCurrentCoroutine<Y>);
     }
 
-    void Resume(coroutine_stack_t **caller_stack_top_ptr) {
+    void Resume() {
         if (status != Status::kSuspended) {
             throw StatusViolationError::New(status, {Status::kSuspended});
         }
-        caller_stack_top_ptr_ = caller_stack_top_ptr;
         status = Status::kRunning;
         current_coroutine<Y> = this;
-        switch_stack(caller_stack_top_ptr_, &stack_top_);
+        switch_stack(&caller_stack_top_, &stack_top_);
     }
 
     void Yield(std::optional<Y> yield_value) {
@@ -134,7 +131,7 @@ private:
     // the stack. Since initially stack is empty, it means that the initial
     // value of stack_top_ is past the allocated memory region.
     coroutine_stack_t *stack_top_;
-    coroutine_stack_t **caller_stack_top_ptr_;
+    coroutine_stack_t *caller_stack_top_;
     // ARM 64-bit requires stack to be 16 byte aligned. See
     // https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#6221universal-stack-constraints
     static const std::align_val_t kStackAlignmentBytes = std::align_val_t(16);
@@ -148,7 +145,7 @@ private:
         }
         status = new_status;
         this->yield_value = yield_value;
-        switch_stack(&stack_top_, caller_stack_top_ptr_);
+        switch_stack(&stack_top_, &caller_stack_top_);
     }
 };
 
@@ -164,7 +161,7 @@ Coroutine<Y> Create(std::function<void(Args...)> fn, Args... args) {
 template<typename Y>
 std::optional<Y> Resume(Coroutine<Y> &coro) {
     auto old_current_coroutine = current_coroutine<Y>;
-    coro.Resume(&current_coroutine_stack_top);
+    coro.Resume();
     current_coroutine<Y> = old_current_coroutine;
     return coro.yield_value;
 }
