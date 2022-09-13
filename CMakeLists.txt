@@ -23,11 +23,3 @@ set_target_properties(coroutine-switch_stack_arm64.s PROPERTIES LINKER_LANGUAGE 
 
 add_executable(coroutine-api.test.cpp src/coroutine/api.test.cpp)
 target_link_libraries(coroutine-api.test.cpp coroutine-switch_stack_arm64.s gtest_main)
-
-add_executable(coroutine-mve.cpp src/coroutine/mve.cpp)
-target_link_libraries(coroutine-mve.cpp coroutine-switch_stack_arm64.s)
-
-add_library(coroutine-example.cpp STATIC src/coroutine/example.cpp)
-
-add_executable(coroutine-example.test.cpp src/coroutine/example.test.cpp)
-target_link_libraries(coroutine-example.test.cpp coroutine-example.cpp gtest_main)
