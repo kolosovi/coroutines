@@ -391,4 +391,502 @@ Target 0: (coroutine-api.test.cpp) stopped.
 place a breakpoint on Yield w/ condition that this = 0x000000016fdfcd00
 ```
 
-hmmm
+Writing down everything that happens:
+1. main calls `coroutine::Create`
+2. `coroutine(merge)` is allocated on the main stack
+3. `old_current_coroutine` is allocated on the main stack, its value is nullptr
+4. scratch data for calling `coroutine(merge).Resume` is allocated on the main stack
+5. `coroutine(merge).Resume` is called
+6. `coroutine(merge).caller_stack_top_ptr_` is equal to the address of `current_coroutine_stack_top`
+7. `current_coroutine<int>` is equal to `coroutine(merge)`
+8. `coroutine(merge).status` is `kRunning`
+9. scratch data for calling `switch_stack` is allocated on the main stack
+10. `current_coroutine_stack_top` is overwritten with main stack top
+11. stack pointer is restored from `coroutine(merge).stack_top_`
+12. registers are restored from the `coroutine(merge)` stack. NB: this doesn't change `coroutine(merge).stack_top_`.
+13. lr is also restored and points at `CallCurrentCoroutine<int>`
+14. `ret` brings program counter to `CallCurrentCoroutine<int>`
+15. `coroutine(merge).Call` is called. Here NB: is there any preparation? Do scratch registers get saved? This should be checked via debugger. I'm not sure, at all.
+16. `coroutine(merge).bound_fn_` is called. This puts scratch data onto `coroutine(merge)` stack
+17. `coroutine(lhs)` is allocated on `coroutine(merge)` stack
+18. `coroutine(rhs)` is allocated on `coroutine(merge)` stack
+19. `coroutine(merge)` calls `coroutine::Resume` with `coroutine(lhs)`
+20. `old_current_coroutine` is allocated on `coroutine(merge)` stack, its value is `coroutine(merge)`
+21. scratch data for calling `coroutine(lhs).Resume` is allocated on `coroutine(merge)` stack
+22. `coroutine(lhs).Resume` is called
+23. `coroutine(lhs).caller_stack_top_ptr_` is equal to address of `current_coroutine_stack_top` => to address of main stack top
+23. `current_coroutine<int>` is equal to `coroutine(lhs)`
+24. `coroutine(lhs).status` is `kRunning`
+25. scratch data for calling `switch_stack` is allocated on `coroutine(merge)` stack
+26. `current_coroutine_stack_top` is overwritten with `coroutine(merge)` stack top
+27. stack pointer is restored from `coroutine(lhs).stack_top_`
+28. registers are restored from the `coroutine(lhs)` stack. NB: this doesn't change `coroutine(lhs).stack_top_`.
+29. lr is also restored and points at `CallCurrentCoroutine<int>`
+30. `ret` brings program counter to `CallCurrentCoroutine<int>`
+31. `coroutine(lhs).Call` is called
+32. `coroutine(lhs).bound_fn_` is called. This puts scratch data onto `coroutine(lhs)` stack
+33. Several frames for `TraverseInOrder` are allocated on `coroutine(lhs)` stack until it reaches leftmost tree node
+34. `coroutine(lhs)` calls `coroutine::Yield`. Scratch data is allocated on `coroutine(lhs)` stack.
+35. `coroutine(lhs).Yield` is called. Scratch data is allocated on `coroutine(lhs)` stack.
+36. `coroutine(lhs).status` is `kSuspended`
+37. `coroutine(lhs).yield_value` is `1` (or whatever, it doesn't matter, at least not yet).
+38. `switch_stack` is called. First argument is pointer to `coroutine(lhs).stack_top_`. Second argument is `coroutine(lhs).caller_stack_top_ptr_`. `coroutine(lhs).caller_stack_top_ptr_` is equal to address of `current_coroutine_stack_top` which is address of main stack top.
+39. `coroutine(lhs).stack_top_` is overwritten with `coroutine(lhs)` stack top
+40. stack pointer is restored from `*coroutine(lhs).caller_stack_top_ptr)`, e.g. stack pointer points at main stack top.
+41. lr is also restored and points to location after calling `coroutine(merge).Resume`.
+
+So hypothesis is that we should arrive at --file api.hpp --line 168. Let's check it.
+
+Actually let's trace it thoroughly:
+1. coroutine created in api.test.cpp (note `coroutine(merge)` address)
+2. `coroutine::Resume` from main (verify that `coroutine(merge)` is resumed)
+3. `coroutine(merge)` call (note `coroutine(lhs)` & `coroutine(rhs)` addresses)
+4. `coroutine::Resume` from `coroutine(merge)`. Check that `coroutine(lhs)` is resumed
+5. `coroutine::Yield` from `coroutine(lhs)`. Check that `coroutine(lhs)` yields
+6. --file api.hpp --line 168 - check that we did yield from coroutine(lhs) actually.
+
+```
+-- breakpoint before coroutine(merge) is created
+(lldb) b --file api.test.cpp --line 160
+Breakpoint 1: where = coroutine-api.test.cpp`Coroutine_MergeBinaryTrees_Test::TestBody() + 2404 at api.test.cpp:160:10, address = 0x000000010000d318
+
+-- breakpoint in coroutine::Resume
+(lldb) b --file api.hpp --line 166
+Breakpoint 2: where = coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coroutine::Coroutine<int>&) + 256 at api.hpp:166:34, address = 0x0000000100007d04
+
+-- breakpoint in MergeTrees
+(lldb) b --file api.test.cpp --line 116
+Breakpoint 3: where = coroutine-api.test.cpp`MergeTrees(TreeNode*, TreeNode*) + 592 at api.test.cpp:116:5, address = 0x000000010000c15c
+
+-- breakpoint in coroutine::Yield
+(lldb) b --file api.hpp --line 176
+Breakpoint 4: where = coroutine-api.test.cpp`void coroutine::Yield<int>(int) + 352 at api.hpp:176:9, address = 0x00000001000084a0
+
+-- breakpoint in coroutine::Resume after
+(lldb) b --file api.hpp --line 168
+Breakpoint 5: where = coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coroutine::Coroutine<int>&) + 316 at api.hpp:168:28, address = 0x0000000100007d40
+
+-- run. I expect to stop at breakpoint 1.
+-- coroutine(merge) address is 0x000000016fdfcd00
+(lldb) r
+Process 49997 launched: '/Users/ikolosov/work/repo/coroutines/build/coroutine-api.test.cpp' (arm64)
+Running main() from /Users/ikolosov/work/repo/coroutines/build/_deps/googletest-src/googletest/src/gtest_main.cc
+Process 49997 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 1.1
+    frame #0: 0x000000010000d318 coroutine-api.test.cpp`Coroutine_MergeBinaryTrees_Test::TestBody(this=0x0000000104800490) at api.test.cpp:160:10
+   157          root1,
+   158          root2
+   159      );
+-> 160      for (int expected = 1; expected <= 22; expected++) {
+   161          EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
+   162          auto yield_value = coroutine::Resume(coro);
+   163          EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p &coro
+(coroutine::Coroutine<int> *) $1 = 0x000000016fdfcd00
+
+-- continue. I expect to stop at breakpoint 2 and I expect to be in the main stack.
+(lldb) c
+Process 49997 resuming
+Process 49997 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x0000000100007d04 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x000000016fdfcd00) at api.hpp:166:34
+   163  // terminated rather than yielded, the return value is empty.
+   164  template<typename Y>
+   165  std::optional<Y> Resume(Coroutine<Y> &coro) {
+-> 166      auto old_current_coroutine = current_coroutine<Y>;
+   167      coro.Resume(&current_coroutine_stack_top);
+   168      current_coroutine<Y> = old_current_coroutine;
+   169      return coro.yield_value;
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- coro is coroutine(merge) which is expected. Good.
+(lldb) p &coro
+(coroutine::Coroutine<int> *) $3 = 0x000000016fdfcd00
+
+-- caller_stack_top_ptr_ is address of main stack top
+(lldb) p caller_stack_top_ptr_
+(coroutine_stack_t **) $18 = 0x000000010032aa00
+
+-- continue. I expect to stop at breakpoint 3.
+-- coroutine(lhs) address is 0x0000000105207520
+-- coroutine(rhs) address is 0x00000001052075d0
+(lldb) c
+Process 49997 resuming
+Process 49997 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 3.1
+    frame #0: 0x000000010000c15c coroutine-api.test.cpp`MergeTrees(lhs_root=0x0000000104701960, rhs_root=0x00000001047017b0) at api.test.cpp:116:5
+   113          std::function<void(TreeNode*)>(TraverseInOrder),
+   114          rhs_root
+   115      );
+-> 116      auto lhs_value = coroutine::Resume(lhs), rhs_value = coroutine::Resume(rhs);
+   117      while (lhs_value || rhs_value) {
+   118          if (lhs_value && (!rhs_value || *lhs_value < *rhs_value)) {
+   119              coroutine::Yield(*lhs_value);
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p &lhs
+(coroutine::Coroutine<int> *) $4 = 0x0000000105207520
+(lldb) p &rhs
+(coroutine::Coroutine<int> *) $5 = 0x00000001052075d0
+
+-- we're in coroutine(merge) stack: it's bottom is at CallCurrentCoroutine, current_coroutine is coroutine(merge). OK.
+(lldb) bt
+    frame #16: 0x0000000100037784 coroutine-api.test.cpp`coroutine::Coroutine<int>::Call(this=0x000000016fdfcd00) at api.hpp:123:9
+    frame #17: 0x000000010003696c coroutine-api.test.cpp`void (anonymous namespace)::CallCurrentCoroutine<int>() at api.hpp:30:31
+(lldb) frame select 17
+frame #17: 0x000000010003696c coroutine-api.test.cpp`void (anonymous namespace)::CallCurrentCoroutine<int>() at api.hpp:30:31
+   27
+   28       template<typename Y>
+   29       static void CallCurrentCoroutine() {
+-> 30           current_coroutine<Y>->Call();
+   31       }
+   32   }
+   33
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $9 = 0x000000016fdfcd00
+
+-- continue. I expect to stop at coroutine::Resume of coroutine(lhs).
+-- I did. OK.
+(lldb) c
+Process 49997 resuming
+Process 49997 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x0000000100007d04 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x0000000105207520) at api.hpp:166:34
+   163  // terminated rather than yielded, the return value is empty.
+   164  template<typename Y>
+   165  std::optional<Y> Resume(Coroutine<Y> &coro) {
+-> 166      auto old_current_coroutine = current_coroutine<Y>;
+   167      coro.Resume(&current_coroutine_stack_top);
+   168      current_coroutine<Y> = old_current_coroutine;
+   169      return coro.yield_value;
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p &coro
+(coroutine::Coroutine<int> *) $10 = 0x0000000105207520
+
+-- address of current_coroutine_stack_top is the same. After this Resume call current_coroutine_stack_top will point at (i.e. contain address of) top of coroutine(merge) stack. Currently it contains main stack top.
+(lldb) p current_coroutine_stack_top
+(coroutine_stack_t *) $20 = 0x000000016fdfc920
+(lldb) p &current_coroutine_stack_top
+(coroutine_stack_t **) $21 = 0x000000010032aa00
+
+-- coroutine(merge) stack top
+(lldb) re read sp
+      sp = 0x00000001052073e0
+(lldb) p current_coroutine->stack_top_
+(coroutine_stack_t *) $22 = 0x0000000105208300
+
+-- caller_stack_top_ptr_ of coroutine(lhs) is the same as address of current_coroutine_stack_top. So basically all coroutines use one global variable to store current stack top.
+(lldb) p caller_stack_top_ptr_
+(coroutine_stack_t **) $23 = 0x000000010032aa00
+
+-- use s + si to walk to stack switch point, look at sp
+-- yes, sp looks like coroutine(merge) stack.
+(lldb)
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x0000000100061e20 coroutine-api.test.cpp`switch_stack + 48
+coroutine-api.test.cpp`switch_stack:
+->  0x100061e20 <+48>: str    x2, [x0]
+    0x100061e24 <+52>: ldr    x2, [x1]
+    0x100061e28 <+56>: mov    sp, x2
+    0x100061e2c <+60>: ldp    d8, d9, [sp]
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) re read sp
+      sp = 0x0000000105207140
+
+-- at the end of stack switch, before ret. This is TRUE stack top of coroutine(lhs)
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x0000000100061e58 coroutine-api.test.cpp`switch_stack + 104
+coroutine-api.test.cpp`switch_stack:
+->  0x100061e58 <+104>: ret
+(lldb) re read sp
+      sp = 0x0000000105212400
+
+-- look at current_coroutine_stack_top after switch
+-- yes, current_coroutine_stack_top = coroutine(merge) stack top. This is after resuming lhs for the first time. So basically it looks like... Like yield from coroutine(lhs) will land at coroutine(merge) stack and code. BUT yield from coroutine(merge) won't: it will land on its own stack but main code. LET'S CHECK THIS.
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x0000000100036928 coroutine-api.test.cpp`void (anonymous namespace)::CallCurrentCoroutine<int>() at api.hpp:29
+   26       static coroutine::Coroutine<Y> *current_coroutine = nullptr;
+   27
+   28       template<typename Y>
+-> 29       static void CallCurrentCoroutine() {
+   30           current_coroutine<Y>->Call();
+   31       }
+   32   }
+(lldb) p current_coroutine_stack_top
+(coroutine_stack_t *) $27 = 0x0000000105207140
+(lldb) p &current_coroutine_stack_top
+(coroutine_stack_t **) $28 = 0x000000010032aa00
+
+-- continue. I expect to stop at coroutine::Yield from coroutine(lhs).
+-- yes, coroutine(lhs).
+-- Note to self: calling user callback this way imposes a very high overhead in terms of memory. Maybe there's a better way? Ideally it should be possible to do it in one frame. Currently I waste a LOT of frames to call coroutine callback. Seems bad.
+(lldb) c
+Process 49997 resuming
+Process 49997 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 4.1
+    frame #0: 0x00000001000084a0 coroutine-api.test.cpp`void coroutine::Yield<int>(yield_value=1) at api.hpp:176:9
+   173  // corresponding Resume.
+   174  template<typename Y>
+   175  void Yield(Y yield_value) {
+-> 176      if (current_coroutine<Y> == nullptr) {
+   177          throw AttemptToYieldFromOutsideACoroutineError();
+   178      }
+   179      current_coroutine<Y>->Yield(std::optional{yield_value});
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $11 = 0x0000000105207520
+
+-- continue. I expect to land at line after coroutine::Resume and in coroutine(merge) stack.
+-- I do land in line after coroutine::Resume and coroutine(merge) stack.
+-- old_current_coroutine is coroutine(merge), and second top frame of stack is MergeTrees.
+-- The problem is: caller stack ptr that is stored in coroutine(merge) is actually pointing at pointer to coroutine(merge) stack top.
+-- Is it so?
+(lldb) c
+Process 49997 resuming
+Process 49997 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 5.1
+    frame #0: 0x0000000100007d40 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x0000000105207520) at api.hpp:168:28
+   165  std::optional<Y> Resume(Coroutine<Y> &coro) {
+   166      auto old_current_coroutine = current_coroutine<Y>;
+   167      coro.Resume(&current_coroutine_stack_top);
+-> 168      current_coroutine<Y> = old_current_coroutine;
+   169      return coro.yield_value;
+   170  }
+   171
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p old_current_coroutine
+(coroutine::Coroutine<int> *) $30 = 0x000000016fdfcd00
+(lldb) bt
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 5.1
+  * frame #0: 0x0000000100007d40 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x0000000105207520) at api.hpp:168:28
+    frame #1: 0x000000010000c168 coroutine-api.test.cpp`MergeTrees(lhs_root=0x0000000104701960, rhs_root=0x00000001047017b0) at api.test.cpp:116:22
+(lldb) p current_coroutine_stack_top
+(coroutine_stack_t *) $31 = 0x0000000105207140
+
+-- After stepping I landed at lhs Resume call site. What I expect next is that I will successfully call Resume(rhs) and yield back to this point. BUT while yielding to main thread I will screw up. Because I will start executing main code but with coroutine(merge) stack.
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x000000010000c168 coroutine-api.test.cpp`MergeTrees(lhs_root=0x0000000104701960, rhs_root=0x00000001047017b0) at api.test.cpp:116:22
+   113          std::function<void(TreeNode*)>(TraverseInOrder),
+   114          rhs_root
+   115      );
+-> 116      auto lhs_value = coroutine::Resume(lhs), rhs_value = coroutine::Resume(rhs);
+   117      while (lhs_value || rhs_value) {
+   118          if (lhs_value && (!rhs_value || *lhs_value < *rhs_value)) {
+   119              coroutine::Yield(*lhs_value);
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- Yeah, I call Resume for rhs.
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 2.1
+    frame #0: 0x0000000100007d04 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x00000001052075d0) at api.hpp:166:34
+   163  // terminated rather than yielded, the return value is empty.
+   164  template<typename Y>
+   165  std::optional<Y> Resume(Coroutine<Y> &coro) {
+-> 166      auto old_current_coroutine = current_coroutine<Y>;
+   167      coro.Resume(&current_coroutine_stack_top);
+   168      current_coroutine<Y> = old_current_coroutine;
+   169      return coro.yield_value;
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p &coro
+(coroutine::Coroutine<int> *) $32 = 0x00000001052075d0
+
+-- Stepping, stepping, stepping. At this point I start stepping by a single instruction.
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x0000000100038bd0 coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(this=0x00000001052075d0, caller_stack_top_ptr=0x000000010032aa00) at api.hpp:115:22
+   112          caller_stack_top_ptr_ = caller_stack_top_ptr;
+   113          status = Status::kRunning;
+   114          current_coroutine<Y> = this;
+-> 115          switch_stack(caller_stack_top_ptr_, &stack_top_);
+   116      }
+   117
+   118      void Yield(std::optional<Y> yield_value) {
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- coroutine(rhs)' stack will be at 0x000000010521c400 initially
+(lldb)
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x0000000100061e58 coroutine-api.test.cpp`switch_stack + 104
+coroutine-api.test.cpp`switch_stack:
+->  0x100061e58 <+104>: ret
+
+coroutine-api.test.cpp`main:
+    0x100061e5c <+0>:   stp    x20, x19, [sp, #-0x20]!
+    0x100061e60 <+4>:   stp    x29, x30, [sp, #0x10]
+    0x100061e64 <+8>:   add    x29, sp, #0x10            ; =0x10
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) re read sp
+      sp = 0x000000010521c400
+
+-- Stepped some more. We are now yielding from coroutine(rhs). I expect this to go well (i.e. we do yield into coroutine(merge) successfully)
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 4.1
+    frame #0: 0x00000001000084a0 coroutine-api.test.cpp`void coroutine::Yield<int>(yield_value=2) at api.hpp:176:9
+   173  // corresponding Resume.
+   174  template<typename Y>
+   175  void Yield(Y yield_value) {
+-> 176      if (current_coroutine<Y> == nullptr) {
+   177          throw AttemptToYieldFromOutsideACoroutineError();
+   178      }
+   179      current_coroutine<Y>->Yield(std::optional{yield_value});
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p current_coroutine
+(coroutine::Coroutine<int> *) $37 = 0x00000001052075d0
+(lldb) bt
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 4.1
+  * frame #0: 0x00000001000084a0 coroutine-api.test.cpp`void coroutine::Yield<int>(yield_value=2) at api.hpp:176:9
+    frame #1: 0x000000010000829c coroutine-api.test.cpp`TraverseInOrder(node=0x0000000104701750) at api.test.cpp:43:5
+    frame #2: 0x00000001000081ec coroutine-api.test.cpp`TraverseInOrder(node=0x0000000104701780) at api.test.cpp:42:5
+    frame #3: 0x00000001000081ec coroutine-api.test.cpp`TraverseInOrder(node=0x00000001047017b0) at api.test.cpp:42:5
+
+-- At the end of Yield from coroutine(rhs).
+(lldb)
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x0000000100061e58 coroutine-api.test.cpp`switch_stack + 104
+coroutine-api.test.cpp`switch_stack:
+->  0x100061e58 <+104>: ret
+
+coroutine-api.test.cpp`main:
+    0x100061e5c <+0>:   stp    x20, x19, [sp, #-0x20]!
+    0x100061e60 <+4>:   stp    x29, x30, [sp, #0x10]
+    0x100061e64 <+8>:   add    x29, sp, #0x10            ; =0x10
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) re read sp
+      sp = 0x0000000105207240
+(lldb) re read lr
+      lr = 0x0000000100038bfc  coroutine-api.test.cpp`coroutine::Coroutine<int>::Resume(unsigned long long**) + 1020 at api.hpp:115:9
+
+-- After Yield in Resume. Looks legit
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 5.1
+    frame #0: 0x0000000100007d40 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x00000001052075d0) at api.hpp:168:28
+   165  std::optional<Y> Resume(Coroutine<Y> &coro) {
+   166      auto old_current_coroutine = current_coroutine<Y>;
+   167      coro.Resume(&current_coroutine_stack_top);
+-> 168      current_coroutine<Y> = old_current_coroutine;
+   169      return coro.yield_value;
+   170  }
+   171
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p old_current_coroutine
+(coroutine::Coroutine<int> *) $40 = 0x000000016fdfcd00
+* thread #1, queue = 'com.apple.main-thread', stop reason = breakpoint 5.1
+  * frame #0: 0x0000000100007d40 coroutine-api.test.cpp`std::__1::optional<int> coroutine::Resume<int>(coro=0x00000001052075d0) at api.hpp:168:28
+    frame #1: 0x000000010000c210 coroutine-api.test.cpp`MergeTrees(lhs_root=0x0000000104701960, rhs_root=0x00000001047017b0) at api.test.cpp:116:58
+
+-- Before yielding from coroutine(merge)
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x000000010000c408 coroutine-api.test.cpp`MergeTrees(lhs_root=0x0000000104701960, rhs_root=0x00000001047017b0) at api.test.cpp:119:30
+   116      auto lhs_value = coroutine::Resume(lhs), rhs_value = coroutine::Resume(rhs);
+   117      while (lhs_value || rhs_value) {
+   118          if (lhs_value && (!rhs_value || *lhs_value < *rhs_value)) {
+-> 119              coroutine::Yield(*lhs_value);
+   120              lhs_value = coroutine::Resume(lhs);
+   121          } else {
+   122              coroutine::Yield(*rhs_value);
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- Hmmm.... So if caller_stack_top_ptr_ is actually coroutine(merge) stack, I will basically switch to coroutine(merge) stack AND coroutine(merge) code? Because link register is also stored on the stack.
+(lldb) s
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = step in
+    frame #0: 0x0000000100016f88 coroutine-api.test.cpp`coroutine::Coroutine<int>::yield(this=0x000000016fdfcd00, new_status=kSuspended, yield_value= Has Value=true ) at api.hpp:151:23
+   148          }
+   149          status = new_status;
+   150          this->yield_value = yield_value;
+-> 151          switch_stack(&stack_top_, caller_stack_top_ptr_);
+   152      }
+   153  };
+   154
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) p stack_top_
+(coroutine_stack_t *) $41 = 0x0000000105208300
+(lldb) p *caller_stack_top_ptr_
+(coroutine_stack_t *) $42 = 0x0000000105207140
+(lldb)
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x0000000100061e1c coroutine-api.test.cpp`switch_stack + 44
+coroutine-api.test.cpp`switch_stack:
+->  0x100061e1c <+44>: mov    x2, sp
+    0x100061e20 <+48>: str    x2, [x0]
+    0x100061e24 <+52>: ldr    x2, [x1]
+    0x100061e28 <+56>: mov    sp, x2
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) re read sp
+      sp = 0x0000000105206f20
+(lldb)
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x0000000100061e2c coroutine-api.test.cpp`switch_stack + 60
+coroutine-api.test.cpp`switch_stack:
+->  0x100061e2c <+60>: ldp    d8, d9, [sp]
+    0x100061e30 <+64>: ldp    d10, d11, [sp, #0x10]
+    0x100061e34 <+68>: ldp    d12, d13, [sp, #0x20]
+    0x100061e38 <+72>: ldp    d14, d15, [sp, #0x30]
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) re read sp
+      sp = 0x0000000105207140
+
+-- So basically I will jump to some memory area which doesn't even store code.
+(lldb) si
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x0000000100061e58 coroutine-api.test.cpp`switch_stack + 104
+coroutine-api.test.cpp`switch_stack:
+->  0x100061e58 <+104>: ret
+
+coroutine-api.test.cpp`main:
+    0x100061e5c <+0>:   stp    x20, x19, [sp, #-0x20]!
+    0x100061e60 <+4>:   stp    x29, x30, [sp, #0x10]
+    0x100061e64 <+8>:   add    x29, sp, #0x10            ; =0x10
+Target 0: (coroutine-api.test.cpp) stopped.
+(lldb) re read lr
+      lr = 0x000000016fdfcd00
+(lldb) re read sp
+      sp = 0x0000000105207240
+(lldb) x/4i $lr
+    0x16fdfcd00: 0x00000001   udf    #0x1
+    0x16fdfcd04: 0x00000001   udf    #0x1
+    0x16fdfcd08: 0x00000001   udf    #0x1
+    0x16fdfcd0c: 0x00000000   udf    #0x0
+
+-- Yeah.
+(lldb) si
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = instruction step into
+    frame #0: 0x000000016fdfcd00
+->  0x16fdfcd00: udf    #0x1
+    0x16fdfcd04: udf    #0x1
+    0x16fdfcd08: udf    #0x1
+    0x16fdfcd0c: udf    #0x0
+Target 0: (coroutine-api.test.cpp) stopped.
+
+-- And this is what causes bad access. So bad access can also be caused by shoving garbage into the instruction decoder??
+(lldb)
+Process 51267 stopped
+* thread #1, queue = 'com.apple.main-thread', stop reason = EXC_BAD_ACCESS (code=2, address=0x16fdfcd00)
+    frame #0: 0x000000016fdfcd00
+->  0x16fdfcd00: udf    #0x1
+    0x16fdfcd04: udf    #0x1
+    0x16fdfcd08: udf    #0x1
+    0x16fdfcd0c: udf    #0x0
+Target 0: (coroutine-api.test.cpp) stopped.
+```
+
+So what happens. I have a GLOBAL VARIABLE that stores pointer to current coroutine stack top. It seems that I don't need it. When switching stack to a coroutine I store stack pointer into an instance variable of the coroutine. When yielding I use this value. That's it.
