@@ -15,7 +15,7 @@ template <typename Y>
 class Coroutine;
 }
 
-namespace {
+namespace detail {
 using coroutine_stack_t = uint64_t;
 
 extern "C" void switch_stack(coroutine_stack_t **old_stack_top,
@@ -28,7 +28,7 @@ template <typename Y>
 static void CallCurrentCoroutine() {
   current_coroutine<Y>->Call();
 }
-}  // namespace
+}  // namespace detail
 
 namespace coroutine {
 
@@ -88,17 +88,19 @@ class AttemptToYieldFromOutsideACoroutineError : public std::logic_error {
 template <typename Y>
 class Coroutine {
  public:
-  Coroutine(std::function<void()> bound_fn)
+  explicit Coroutine(std::function<void()> bound_fn)
       : status(Status::kSuspended),
         bound_fn_(bound_fn),
-        stack_(new (kStackAlignmentBytes) coroutine_stack_t[kStackLength]),
+        stack_(new (kStackAlignmentBytes)
+                   detail::coroutine_stack_t[kStackLength]),
         stack_top_(stack_.get() + kStackLength),
         caller_stack_top_(nullptr) {
     for (int i = 0; i < kInitialStackOffset; i++) {
       *(--stack_top_) = 0;
     }
     stack_top_[kLinkRegisterOffset] =
-        reinterpret_cast<coroutine_stack_t>(CallCurrentCoroutine<Y>);
+        reinterpret_cast<detail::coroutine_stack_t>(
+            detail::CallCurrentCoroutine<Y>);
   }
 
   void Resume() {
@@ -106,8 +108,8 @@ class Coroutine {
       throw StatusViolationError::New(status, {Status::kSuspended});
     }
     status = Status::kRunning;
-    current_coroutine<Y> = this;
-    switch_stack(&caller_stack_top_, &stack_top_);
+    detail::current_coroutine<Y> = this;
+    detail::switch_stack(&caller_stack_top_, &stack_top_);
   }
 
   void Yield(std::optional<Y> yield_value) {
@@ -124,18 +126,21 @@ class Coroutine {
 
  private:
   std::function<void()> bound_fn_;
-  std::unique_ptr<coroutine_stack_t[]> stack_;
+  std::unique_ptr<detail::coroutine_stack_t[]> stack_;
   // stack_top_ always points at topmost (i.e. lowest-address) full byte of
   // the stack. Since initially stack is empty, it means that the initial
   // value of stack_top_ is past the allocated memory region.
-  coroutine_stack_t *stack_top_;
-  coroutine_stack_t *caller_stack_top_;
+  detail::coroutine_stack_t *stack_top_;
+  detail::coroutine_stack_t *caller_stack_top_;
   // ARM 64-bit requires stack to be 16 byte aligned. See
   // https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst#6221universal-stack-constraints
   static const std::align_val_t kStackAlignmentBytes = std::align_val_t(16);
-  static const int kStackLength = (32 * 1024) / sizeof(coroutine_stack_t);
-  static const int kInitialStackOffset = 0x100 / sizeof(coroutine_stack_t);
-  static const int kLinkRegisterOffset = 0x98 / sizeof(coroutine_stack_t);
+  static const int kStackLength =
+      (32 * 1024) / sizeof(detail::coroutine_stack_t);
+  static const int kInitialStackOffset =
+      0x100 / sizeof(detail::coroutine_stack_t);
+  static const int kLinkRegisterOffset =
+      0x98 / sizeof(detail::coroutine_stack_t);
 
   void yield(Status new_status, std::optional<Y> yield_value) {
     if (status != Status::kRunning) {
@@ -143,7 +148,7 @@ class Coroutine {
     }
     status = new_status;
     this->yield_value = yield_value;
-    switch_stack(&stack_top_, &caller_stack_top_);
+    detail::switch_stack(&stack_top_, &caller_stack_top_);
   }
 };
 
@@ -157,21 +162,21 @@ Coroutine<Y> Create(std::function<void(Args...)> fn, Args... args) {
 // or terminates. Returns the value yielded by the coroutine. If coroutine
 // terminated rather than yielded, the return value is empty.
 template <typename Y>
-std::optional<Y> Resume(Coroutine<Y> &coro) {
-  auto old_current_coroutine = current_coroutine<Y>;
-  coro.Resume();
-  current_coroutine<Y> = old_current_coroutine;
-  return coro.yield_value;
+std::optional<Y> Resume(Coroutine<Y> *coro) {
+  auto old_current_coroutine = detail::current_coroutine<Y>;
+  coro->Resume();
+  detail::current_coroutine<Y> = old_current_coroutine;
+  return coro->yield_value;
 }
 
 // Suspends execution of coroutine. yield_value becomes the return value of the
 // corresponding Resume.
 template <typename Y>
 void Yield(Y yield_value) {
-  if (current_coroutine<Y> == nullptr) {
+  if (detail::current_coroutine<Y> == nullptr) {
     throw AttemptToYieldFromOutsideACoroutineError();
   }
-  current_coroutine<Y>->Yield(std::optional{yield_value});
+  detail::current_coroutine<Y>->Yield(std::optional{yield_value});
 }
 
 }  // namespace coroutine

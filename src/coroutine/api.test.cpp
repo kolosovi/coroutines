@@ -1,26 +1,25 @@
 #include <gtest/gtest.h>
 
-#include <coroutine/api.hpp>
 #include <functional>
+
+#include <coroutine/api.hpp>
 
 TEST(Coroutine, CreateAndResume) {
   std::optional<int> yield_value{};
   auto coro = coroutine::Create<int, int, int>(
-      std::function<void(int, int)>([](int lhs, int rhs) -> void {
-        coroutine::Yield(lhs - rhs);
-        ;
-      }),
+      std::function<void(int, int)>(
+          [](int lhs, int rhs) -> void { coroutine::Yield(lhs - rhs); }),
       5, 3);
   EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
 
-  yield_value = coroutine::Resume(coro);
+  yield_value = coroutine::Resume(&coro);
   EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
-  EXPECT_TRUE(bool(yield_value));
+  EXPECT_TRUE(static_cast<bool>(yield_value));
   EXPECT_EQ(*yield_value, 2);
 
-  yield_value = coroutine::Resume(coro);
+  yield_value = coroutine::Resume(&coro);
   EXPECT_EQ(coro.status, coroutine::Status::kDead);
-  EXPECT_FALSE(bool(yield_value));
+  EXPECT_FALSE(static_cast<bool>(yield_value));
 }
 
 struct TreeNode {
@@ -28,7 +27,7 @@ struct TreeNode {
   TreeNode *left;
   TreeNode *right;
 
-  TreeNode(int val) : TreeNode(val, nullptr, nullptr) {}
+  explicit TreeNode(int val) : TreeNode(val, nullptr, nullptr) {}
   TreeNode(int val, TreeNode *left, TreeNode *right)
       : val(val), left(left), right(right) {}
 };
@@ -53,14 +52,14 @@ TEST(Coroutine, TraverseBinaryTree1) {
       std::function<void(TreeNode *)>(TraverseInOrder), root);
   for (int expected = 1; expected <= 9; ++expected) {
     EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
-    auto yield_value = coroutine::Resume(coro);
+    auto yield_value = coroutine::Resume(&coro);
     EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
-    EXPECT_TRUE(bool(yield_value));
+    EXPECT_TRUE(static_cast<bool>(yield_value));
     EXPECT_EQ(*yield_value, expected);
   }
-  auto yield_value = coroutine::Resume(coro);
+  auto yield_value = coroutine::Resume(&coro);
   EXPECT_EQ(coro.status, coroutine::Status::kDead);
-  EXPECT_FALSE(bool(yield_value));
+  EXPECT_FALSE(static_cast<bool>(yield_value));
 }
 
 TEST(Coroutine, TraverseBinaryTree2) {
@@ -74,14 +73,14 @@ TEST(Coroutine, TraverseBinaryTree2) {
       std::function<void(TreeNode *)>(TraverseInOrder), root);
   for (int expected = 2; expected <= 22; expected += 2) {
     EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
-    auto yield_value = coroutine::Resume(coro);
+    auto yield_value = coroutine::Resume(&coro);
     EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
-    EXPECT_TRUE(bool(yield_value));
+    EXPECT_TRUE(static_cast<bool>(yield_value));
     EXPECT_EQ(*yield_value, expected);
   }
-  auto yield_value = coroutine::Resume(coro);
+  auto yield_value = coroutine::Resume(&coro);
   EXPECT_EQ(coro.status, coroutine::Status::kDead);
-  EXPECT_FALSE(bool(yield_value));
+  EXPECT_FALSE(static_cast<bool>(yield_value));
 }
 
 void MergeTrees(TreeNode *lhs_root, TreeNode *rhs_root) {
@@ -89,14 +88,14 @@ void MergeTrees(TreeNode *lhs_root, TreeNode *rhs_root) {
       std::function<void(TreeNode *)>(TraverseInOrder), lhs_root);
   auto rhs = coroutine::Create<int, TreeNode *>(
       std::function<void(TreeNode *)>(TraverseInOrder), rhs_root);
-  auto lhs_value = coroutine::Resume(lhs), rhs_value = coroutine::Resume(rhs);
+  auto lhs_value = coroutine::Resume(&lhs), rhs_value = coroutine::Resume(&rhs);
   while (lhs_value || rhs_value) {
     if (lhs_value && (!rhs_value || *lhs_value < *rhs_value)) {
       coroutine::Yield(*lhs_value);
-      lhs_value = coroutine::Resume(lhs);
+      lhs_value = coroutine::Resume(&lhs);
     } else {
       coroutine::Yield(*rhs_value);
-      rhs_value = coroutine::Resume(rhs);
+      rhs_value = coroutine::Resume(&rhs);
     }
   }
 }
@@ -118,12 +117,12 @@ TEST(Coroutine, MergeBinaryTrees) {
       std::function<void(TreeNode *, TreeNode *)>(MergeTrees), root1, root2);
   for (int expected = 1; expected <= 20; expected++) {
     EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
-    auto yield_value = coroutine::Resume(coro);
+    auto yield_value = coroutine::Resume(&coro);
     EXPECT_EQ(coro.status, coroutine::Status::kSuspended);
-    EXPECT_TRUE(bool(yield_value));
+    EXPECT_TRUE(static_cast<bool>(yield_value));
     EXPECT_EQ(*yield_value, expected);
   }
-  auto yield_value = coroutine::Resume(coro);
+  auto yield_value = coroutine::Resume(&coro);
   EXPECT_EQ(coro.status, coroutine::Status::kDead);
-  EXPECT_FALSE(bool(yield_value));
+  EXPECT_FALSE(static_cast<bool>(yield_value));
 }
