@@ -126,3 +126,32 @@ TEST(Coroutine, MergeBinaryTrees) {
   EXPECT_EQ(coro.status, coroutine::Status::kDead);
   EXPECT_FALSE(static_cast<bool>(yield_value));
 }
+
+TEST(Coroutine, IsPolymorphic) {
+  std::vector<std::string> input{"The",  "quick", "brown", "fox", "jumps",
+                                 "over", "the",   "lazy",  "dog"};
+  auto producer =
+      coroutine::Create<std::string>(std::function<void()>([&input]() {
+        for (const auto &item : input) {
+          coroutine::Yield(item);
+        }
+      }));
+  auto transformer =
+      coroutine::Create<int>(std::function<void()>([&producer]() {
+        std::optional<std::string> yield_value = coroutine::Resume(&producer);
+        for (; yield_value; yield_value = coroutine::Resume(&producer)) {
+          coroutine::Yield(static_cast<int>(yield_value->size()));
+        }
+      }));
+  std::vector<int> expected{3, 5, 5, 3, 5, 4, 3, 4, 3};
+  for (auto expected_value : expected) {
+    EXPECT_EQ(transformer.status, coroutine::Status::kSuspended);
+    auto yield_value = coroutine::Resume(&transformer);
+    EXPECT_EQ(transformer.status, coroutine::Status::kSuspended);
+    EXPECT_TRUE(static_cast<bool>(yield_value));
+    EXPECT_EQ(*yield_value, expected_value);
+  }
+  auto yield_value = coroutine::Resume(&transformer);
+  EXPECT_EQ(transformer.status, coroutine::Status::kDead);
+  EXPECT_FALSE(static_cast<bool>(yield_value));
+}
