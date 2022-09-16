@@ -14,7 +14,16 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
 
+FetchContent_Declare(
+    fmt
+    GIT_REPOSITORY git@github.com:fmtlib/fmt.git
+    GIT_TAG 9.1.0
+)
+FetchContent_MakeAvailable(fmt)
+
 include_directories(include)
+# include_directories(include build/_deps/fmt-src/include)
+
 # Target naming convention: target name corresponds to .cpp filename without the
 # src/ prefix, with directory separators converted to hyphens. Everything else
 # is left as is.
@@ -23,3 +32,11 @@ set_target_properties(coroutine-switch_stack_arm64.s PROPERTIES LINKER_LANGUAGE 
 
 add_executable(coroutine-api.test.cpp src/coroutine/api.test.cpp)
 target_link_libraries(coroutine-api.test.cpp coroutine-switch_stack_arm64.s gtest_main)
+
+add_library(io-blocking.cpp STATIC src/io/blocking.cpp)
+target_link_libraries(io-blocking.cpp PUBLIC fmt)
+
+add_library(io-addrinfo.cpp STATIC src/io/addrinfo.cpp)
+
+add_executable(examples-blocking_fetch_urls.cpp src/examples/blocking_fetch_urls.cpp)
+target_link_libraries(examples-blocking_fetch_urls.cpp fmt::fmt io-addrinfo.cpp io-blocking.cpp)

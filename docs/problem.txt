@@ -890,3 +890,9 @@ Target 0: (coroutine-api.test.cpp) stopped.
 ```
 
 So what happens. I have a GLOBAL VARIABLE that stores pointer to current coroutine stack top. It seems that I don't need it. When switching stack to a coroutine I store stack pointer into an instance variable of the coroutine. When yielding I use this value. That's it.
+
+## How to do I/O
+
+1st step: for each of the list of URLs let's call a function that makes a connection, then sends a http request, then waits for output, then yields result (really)?
+
+includes are here: /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/
