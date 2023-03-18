@@ -3,9 +3,14 @@ cmake_minimum_required(VERSION 3.10)
 project(coroutines)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror -fsanitize=undefined -fsanitize=address")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra -Wpedantic -Werror")
+if(NOT disable_sanitizers)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined -fsanitize=address")
+endif()
+
 enable_language(CXX ASM)
 
+enable_testing()
 include(FetchContent)
 FetchContent_Declare(
   googletest
@@ -22,7 +27,6 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(fmt)
 
 include_directories(include)
-# include_directories(include build/_deps/fmt-src/include)
 
 # Target naming convention: target name corresponds to .cpp filename without the
 # src/ prefix, with directory separators converted to hyphens. Everything else
@@ -32,6 +36,7 @@ set_target_properties(coroutine-switch_stack_arm64.s PROPERTIES LINKER_LANGUAGE 
 
 add_executable(coroutine-api.test.cpp src/coroutine/api.test.cpp)
 target_link_libraries(coroutine-api.test.cpp coroutine-switch_stack_arm64.s gtest_main)
+gtest_discover_tests("coroutine-api.test.cpp")
 
 add_library(io-blocking.cpp STATIC src/io/blocking.cpp)
 target_link_libraries(io-blocking.cpp PUBLIC fmt)
@@ -40,3 +45,6 @@ add_library(io-addrinfo.cpp STATIC src/io/addrinfo.cpp)
 
 add_executable(examples-blocking_fetch_urls.cpp src/examples/blocking_fetch_urls.cpp)
 target_link_libraries(examples-blocking_fetch_urls.cpp fmt::fmt io-addrinfo.cpp io-blocking.cpp)
+
+add_executable(examples-coroutine_exception.cpp src/examples/coroutine_exception.cpp)
+target_link_libraries(examples-coroutine_exception.cpp coroutine-switch_stack_arm64.s)
