@@ -101,6 +101,8 @@ class Coroutine {
     stack_top_[kLinkRegisterOffset] =
         reinterpret_cast<detail::coroutine_stack_t>(
             detail::CallCurrentCoroutine<Y>);
+    stack_top_[kFramePointerOffset] = reinterpret_cast<detail::coroutine_stack_t>(
+            &stack_top_[kInitialStackOffset]);
   }
 
   void Resume() {
@@ -139,6 +141,8 @@ class Coroutine {
       (32 * 1024) / sizeof(detail::coroutine_stack_t);
   static const int kInitialStackOffset =
       0x100 / sizeof(detail::coroutine_stack_t);
+  static const int kFramePointerOffset =
+      0x90 / sizeof(detail::coroutine_stack_t);
   static const int kLinkRegisterOffset =
       0x98 / sizeof(detail::coroutine_stack_t);
 

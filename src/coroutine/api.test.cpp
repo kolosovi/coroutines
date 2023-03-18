@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <functional>
+#include <stdexcept>
 
 #include <coroutine/api.hpp>
 
@@ -154,4 +155,17 @@ TEST(Coroutine, IsPolymorphic) {
   auto yield_value = coroutine::Resume(&transformer);
   EXPECT_EQ(transformer.status, coroutine::Status::kDead);
   EXPECT_FALSE(static_cast<bool>(yield_value));
+}
+
+TEST(Coroutine, ExceptionDoesNotTriggerAddressSanitizer) {
+  auto bad_coro = coroutine::Create<int>(
+      std::function<void()>([]() { throw std::runtime_error{"sike"}; }));
+  bool exception_was_caught = false;
+  try {
+    coroutine::Resume(&bad_coro);
+  } catch (std::runtime_error exc) {
+    EXPECT_EQ(exc.what(), "sike");
+    exception_was_caught = true;
+  }
+  EXPECT_TRUE(exception_was_caught);
 }
